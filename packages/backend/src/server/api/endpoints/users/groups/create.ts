@@ -1,9 +1,11 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { UserGroups, UserGroupJoinings } from '@/models/index';
-import { genId } from '@/misc/gen-id';
-import { UserGroup } from '@/models/entities/user-group';
-import { UserGroupJoining } from '@/models/entities/user-group-joining';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UserGroupsRepository, UserGroupJoiningsRepository } from '@/models/index.js';
+import { IdService } from '@/core/IdService.js';
+import type { UserGroup } from '@/models/entities/UserGroup.js';
+import type { UserGroupJoining } from '@/models/entities/UserGroupJoining.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { UserGroupEntityService } from '@/core/entities/UserGroupEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['groups'],
@@ -12,11 +14,7 @@ export const meta = {
 
 	kind: 'write:user-groups',
 
-	params: {
-		name: {
-			validator: $.str.range(1, 100),
-		},
-	},
+	description: 'Create a new group.',
 
 	res: {
 		type: 'object',
@@ -25,22 +23,44 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		name: { type: 'string', minLength: 1, maxLength: 100 },
+	},
+	required: ['name'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const userGroup = await UserGroups.insert({
-		id: genId(),
-		createdAt: new Date(),
-		userId: user.id,
-		name: ps.name,
-	} as UserGroup).then(x => UserGroups.findOneOrFail(x.identifiers[0]));
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.userGroupsRepository)
+		private userGroupsRepository: UserGroupsRepository,
 
-	// Push the owner
-	await UserGroupJoinings.insert({
-		id: genId(),
-		createdAt: new Date(),
-		userId: user.id,
-		userGroupId: userGroup.id,
-	} as UserGroupJoining);
+		@Inject(DI.userGroupJoiningsRepository)
+		private userGroupJoiningsRepository: UserGroupJoiningsRepository,
 
-	return await UserGroups.pack(userGroup);
-});
+		private userGroupEntityService: UserGroupEntityService,
+		private idService: IdService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const userGroup = await this.userGroupsRepository.insert({
+				id: this.idService.genId(),
+				createdAt: new Date(),
+				userId: me.id,
+				name: ps.name,
+			} as UserGroup).then(x => this.userGroupsRepository.findOneByOrFail(x.identifiers[0]));
+
+			// Push the owner
+			await this.userGroupJoiningsRepository.insert({
+				id: this.idService.genId(),
+				createdAt: new Date(),
+				userId: me.id,
+				userGroupId: userGroup.id,
+			} as UserGroupJoining);
+
+			return await this.userGroupEntityService.pack(userGroup);
+		});
+	}
+}

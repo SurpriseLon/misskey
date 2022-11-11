@@ -1,24 +1,37 @@
-import { USER_ONLINE_THRESHOLD } from '@/const';
-import { Users } from '@/models/index';
 import { MoreThan } from 'typeorm';
-import define from '../define';
+import { Inject, Injectable } from '@nestjs/common';
+import { USER_ONLINE_THRESHOLD } from '@/const.js';
+import type { UsersRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['meta'],
 
 	requireCredential: false,
+} as const;
 
-	params: {
-	},
+export const paramDef = {
+	type: 'object',
+	properties: {},
+	required: [],
 } as const;
 
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async () => {
-	const count = await Users.count({
-		lastActiveDate: MoreThan(new Date(Date.now() - USER_ONLINE_THRESHOLD)),
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
+	) {
+		super(meta, paramDef, async () => {
+			const count = await this.usersRepository.countBy({
+				lastActiveDate: MoreThan(new Date(Date.now() - USER_ONLINE_THRESHOLD)),
+			});
 
-	return {
-		count,
-	};
-});
+			return {
+				count,
+			};
+		});
+	}
+}

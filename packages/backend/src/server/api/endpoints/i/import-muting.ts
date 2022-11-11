@@ -1,10 +1,10 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { createImportMutingJob } from '@/queue/index';
+import { Inject, Injectable } from '@nestjs/common';
 import ms from 'ms';
-import { ApiError } from '../../error';
-import { DriveFiles } from '@/models/index';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { QueueService } from '@/core/QueueService.js';
+import type { DriveFilesRepository } from '@/models/index.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	secure: true,
@@ -13,12 +13,6 @@ export const meta = {
 	limit: {
 		duration: ms('1hour'),
 		max: 1,
-	},
-
-	params: {
-		fileId: {
-			validator: $.type(ID),
-		},
 	},
 
 	errors: {
@@ -48,14 +42,32 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		fileId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['fileId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const file = await DriveFiles.findOne(ps.fileId);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
 
-	if (file == null) throw new ApiError(meta.errors.noSuchFile);
-	//if (!file.type.endsWith('/csv')) throw new ApiError(meta.errors.unexpectedFileType);
-	if (file.size > 50000) throw new ApiError(meta.errors.tooBigFile);
-	if (file.size === 0) throw new ApiError(meta.errors.emptyFile);
+		private queueService: QueueService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const file = await this.driveFilesRepository.findOneBy({ id: ps.fileId });
 
-	createImportMutingJob(user, file.id);
-});
+			if (file == null) throw new ApiError(meta.errors.noSuchFile);
+			//if (!file.type.endsWith('/csv')) throw new ApiError(meta.errors.unexpectedFileType);
+			if (file.size > 50000) throw new ApiError(meta.errors.tooBigFile);
+			if (file.size === 0) throw new ApiError(meta.errors.emptyFile);
+
+			this.queueService.createImportMutingJob(me, file.id);
+		});
+	}
+}

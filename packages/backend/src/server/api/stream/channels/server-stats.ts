@@ -1,25 +1,28 @@
-import autobind from 'autobind-decorator';
 import Xev from 'xev';
-import Channel from '../channel';
+import { Inject, Injectable } from '@nestjs/common';
+import Channel from '../channel.js';
 
 const ev = new Xev();
 
-export default class extends Channel {
+class ServerStatsChannel extends Channel {
 	public readonly chName = 'serverStats';
 	public static shouldShare = true;
 	public static requireCredential = false;
 
-	@autobind
+	constructor(id: string, connection: Channel['connection']) {
+		super(id, connection);
+		this.onStats = this.onStats.bind(this);
+		this.onMessage = this.onMessage.bind(this);
+	}
+
 	public async init(params: any) {
 		ev.addListener('serverStats', this.onStats);
 	}
 
-	@autobind
 	private onStats(stats: any) {
 		this.send('stats', stats);
 	}
 
-	@autobind
 	public onMessage(type: string, body: any) {
 		switch (type) {
 			case 'requestLog':
@@ -34,8 +37,24 @@ export default class extends Channel {
 		}
 	}
 
-	@autobind
 	public dispose() {
 		ev.removeListener('serverStats', this.onStats);
+	}
+}
+
+@Injectable()
+export class ServerStatsChannelService {
+	public readonly shouldShare = ServerStatsChannel.shouldShare;
+	public readonly requireCredential = ServerStatsChannel.requireCredential;
+
+	constructor(
+	) {
+	}
+
+	public create(id: string, connection: Channel['connection']): ServerStatsChannel {
+		return new ServerStatsChannel(
+			id,
+			connection,
+		);
 	}
 }

@@ -1,7 +1,9 @@
 import { IsNull } from 'typeorm';
-import define from '../../../define';
-import { deleteFile } from '@/services/drive/delete-file';
-import { DriveFiles } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { DriveFilesRepository } from '@/models/index.js';
+import { DriveService } from '@/core/DriveService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['admin'],
@@ -10,13 +12,29 @@ export const meta = {
 	requireModerator: true,
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const files = await DriveFiles.find({
-		userId: IsNull(),
-	});
+export const paramDef = {
+	type: 'object',
+	properties: {},
+	required: [],
+} as const;
 
-	for (const file of files) {
-		deleteFile(file);
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
+
+		private driveService: DriveService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const files = await this.driveFilesRepository.findBy({
+				userId: IsNull(),
+			});
+
+			for (const file of files) {
+				this.driveService.deleteFile(file);
+			}
+		});
 	}
-});
+}

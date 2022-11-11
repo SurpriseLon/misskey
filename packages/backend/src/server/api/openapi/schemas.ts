@@ -1,6 +1,7 @@
-import { refs, MinimumSchema } from '@/misc/schema';
+import type { Schema } from '@/misc/schema.js';
+import { refs } from '@/misc/schema.js';
 
-export function convertSchemaToOpenApiSchema(schema: MinimumSchema) {
+export function convertSchemaToOpenApiSchema(schema: Schema) {
 	const res: any = schema;
 
 	if (schema.type === 'object' && schema.properties) {
@@ -55,6 +56,6 @@ export const schemas = {
 	},
 
 	...Object.fromEntries(
-		Object.entries(refs).map(([key, schema]) => [key, convertSchemaToOpenApiSchema(schema)])
+		Object.entries(refs).map(([key, schema]) => [key, convertSchemaToOpenApiSchema(schema)]),
 	),
 };

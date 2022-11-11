@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { DriveFolders } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { DriveFoldersRepository } from '@/models/index.js';
+import { DriveFolderEntityService } from '@/core/entities/DriveFolderEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['drive'],
@@ -10,12 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'read:drive',
-
-	params: {
-		folderId: {
-			validator: $.type(ID),
-		},
-	},
 
 	res: {
 		type: 'object',
@@ -32,19 +27,37 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		folderId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['folderId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	// Get folder
-	const folder = await DriveFolders.findOne({
-		id: ps.folderId,
-		userId: user.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFoldersRepository)
+		private driveFoldersRepository: DriveFoldersRepository,
 
-	if (folder == null) {
-		throw new ApiError(meta.errors.noSuchFolder);
+		private driveFolderEntityService: DriveFolderEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Get folder
+			const folder = await this.driveFoldersRepository.findOneBy({
+				id: ps.folderId,
+				userId: me.id,
+			});
+
+			if (folder == null) {
+				throw new ApiError(meta.errors.noSuchFolder);
+			}
+
+			return await this.driveFolderEntityService.pack(folder, {
+				detail: true,
+			});
+		});
 	}
-
-	return await DriveFolders.pack(folder, {
-		detail: true,
-	});
-});
+}

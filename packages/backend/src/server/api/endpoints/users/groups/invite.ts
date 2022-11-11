@@ -1,12 +1,12 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { getUser } from '../../../common/getters';
-import { UserGroups, UserGroupJoinings, UserGroupInvitations } from '@/models/index';
-import { genId } from '@/misc/gen-id';
-import { UserGroupInvitation } from '@/models/entities/user-group-invitation';
-import { createNotification } from '@/services/create-notification';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UserGroupsRepository, UserGroupJoiningsRepository, UserGroupInvitationsRepository } from '@/models/index.js';
+import { IdService } from '@/core/IdService.js';
+import type { UserGroupInvitation } from '@/models/entities/UserGroupInvitation.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { GetterService } from '@/server/api/GetterService.js';
+import { CreateNotificationService } from '@/core/CreateNotificationService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['groups', 'users'],
@@ -15,15 +15,7 @@ export const meta = {
 
 	kind: 'write:user-groups',
 
-	params: {
-		groupId: {
-			validator: $.type(ID),
-		},
-
-		userId: {
-			validator: $.type(ID),
-		},
-	},
+	description: 'Invite a user to an existing group.',
 
 	errors: {
 		noSuchGroup: {
@@ -52,52 +44,79 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		groupId: { type: 'string', format: 'misskey:id' },
+		userId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['groupId', 'userId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	// Fetch the group
-	const userGroup = await UserGroups.findOne({
-		id: ps.groupId,
-		userId: me.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.userGroupsRepository)
+		private userGroupsRepository: UserGroupsRepository,
 
-	if (userGroup == null) {
-		throw new ApiError(meta.errors.noSuchGroup);
+		@Inject(DI.userGroupInvitationsRepository)
+		private userGroupInvitationsRepository: UserGroupInvitationsRepository,
+
+		@Inject(DI.userGroupJoiningsRepository)
+		private userGroupJoiningsRepository: UserGroupJoiningsRepository,
+
+		private idService: IdService,
+		private getterService: GetterService,
+		private createNotificationService: CreateNotificationService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Fetch the group
+			const userGroup = await this.userGroupsRepository.findOneBy({
+				id: ps.groupId,
+				userId: me.id,
+			});
+
+			if (userGroup == null) {
+				throw new ApiError(meta.errors.noSuchGroup);
+			}
+
+			// Fetch the user
+			const user = await this.getterService.getUser(ps.userId).catch(err => {
+				if (err.id === '15348ddd-432d-49c2-8a5a-8069753becff') throw new ApiError(meta.errors.noSuchUser);
+				throw err;
+			});
+
+			const joining = await this.userGroupJoiningsRepository.findOneBy({
+				userGroupId: userGroup.id,
+				userId: user.id,
+			});
+
+			if (joining) {
+				throw new ApiError(meta.errors.alreadyAdded);
+			}
+
+			const existInvitation = await this.userGroupInvitationsRepository.findOneBy({
+				userGroupId: userGroup.id,
+				userId: user.id,
+			});
+
+			if (existInvitation) {
+				throw new ApiError(meta.errors.alreadyInvited);
+			}
+
+			const invitation = await this.userGroupInvitationsRepository.insert({
+				id: this.idService.genId(),
+				createdAt: new Date(),
+				userId: user.id,
+				userGroupId: userGroup.id,
+			} as UserGroupInvitation).then(x => this.userGroupInvitationsRepository.findOneByOrFail(x.identifiers[0]));
+
+			// 通知を作成
+			this.createNotificationService.createNotification(user.id, 'groupInvited', {
+				notifierId: me.id,
+				userGroupInvitationId: invitation.id,
+			});
+		});
 	}
-
-	// Fetch the user
-	const user = await getUser(ps.userId).catch(e => {
-		if (e.id === '15348ddd-432d-49c2-8a5a-8069753becff') throw new ApiError(meta.errors.noSuchUser);
-		throw e;
-	});
-
-	const joining = await UserGroupJoinings.findOne({
-		userGroupId: userGroup.id,
-		userId: user.id,
-	});
-
-	if (joining) {
-		throw new ApiError(meta.errors.alreadyAdded);
-	}
-
-	const existInvitation = await UserGroupInvitations.findOne({
-		userGroupId: userGroup.id,
-		userId: user.id,
-	});
-
-	if (existInvitation) {
-		throw new ApiError(meta.errors.alreadyInvited);
-	}
-
-	const invitation = await UserGroupInvitations.insert({
-		id: genId(),
-		createdAt: new Date(),
-		userId: user.id,
-		userGroupId: userGroup.id,
-	} as UserGroupInvitation).then(x => UserGroupInvitations.findOneOrFail(x.identifiers[0]));
-
-	// 通知を作成
-	createNotification(user.id, 'groupInvited', {
-		notifierId: me.id,
-		userGroupInvitationId: invitation.id,
-	});
-});
+}

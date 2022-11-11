@@ -1,75 +1,57 @@
 <template>
-<XColumn :func="{ handler: setList, title: $ts.selectList }" :column="column" :is-stacked="isStacked">
+<XColumn :menu="menu" :column="column" :is-stacked="isStacked" @parent-focus="$event => emit('parent-focus', $event)">
 	<template #header>
 		<i class="fas fa-list-ul"></i><span style="margin-left: 8px;">{{ column.name }}</span>
 	</template>
 
-	<XTimeline v-if="column.listId" ref="timeline" src="list" :list="column.listId" @after="() => $emit('loaded')"/>
+	<XTimeline v-if="column.listId" ref="timeline" src="list" :list="column.listId" @after="() => emit('loaded')"/>
 </XColumn>
 </template>
 
-<script lang="ts">
-import { defineComponent } from 'vue';
+<script lang="ts" setup>
+import { } from 'vue';
 import XColumn from './column.vue';
-import XTimeline from '@/components/timeline.vue';
+import { updateColumn, Column } from './deck-store';
+import XTimeline from '@/components/MkTimeline.vue';
 import * as os from '@/os';
-import { updateColumn } from './deck-store';
+import { i18n } from '@/i18n';
 
-export default defineComponent({
-	components: {
-		XColumn,
-		XTimeline,
-	},
+const props = defineProps<{
+	column: Column;
+	isStacked: boolean;
+}>();
 
-	props: {
-		column: {
-			type: Object,
-			required: true
-		},
-		isStacked: {
-			type: Boolean,
-			required: true
-		}
-	},
+const emit = defineEmits<{
+	(ev: 'loaded'): void;
+	(ev: 'parent-focus', direction: 'up' | 'down' | 'left' | 'right'): void;
+}>();
 
-	data() {
-		return {
-		};
-	},
+let timeline = $ref<InstanceType<typeof XTimeline>>();
 
-	watch: {
-		mediaOnly() {
-			(this.$refs.timeline as any).reload();
-		}
-	},
+if (props.column.listId == null) {
+	setList();
+}
 
-	mounted() {
-		if (this.column.listId == null) {
-			this.setList();
-		}
-	},
+async function setList() {
+	const lists = await os.api('users/lists/list');
+	const { canceled, result: list } = await os.select({
+		title: i18n.ts.selectList,
+		items: lists.map(x => ({
+			value: x, text: x.name,
+		})),
+		default: props.column.listId,
+	});
+	if (canceled) return;
+	updateColumn(props.column.id, {
+		listId: list.id,
+	});
+}
 
-	methods: {
-		async setList() {
-			const lists = await os.api('users/lists/list');
-			const { canceled, result: list } = await os.select({
-				title: this.$ts.selectList,
-				items: lists.map(x => ({
-					value: x, text: x.name
-				})),
-				default: this.column.listId
-			});
-			if (canceled) return;
-			updateColumn(this.column.id, {
-				listId: list.id
-			});
-		},
-
-		focus() {
-			(this.$refs.timeline as any).focus();
-		}
-	}
-});
+const menu = [{
+	icon: 'fas fa-pencil-alt',
+	text: i18n.ts.selectList,
+	action: setList,
+}];
 </script>
 
 <style lang="scss" scoped>

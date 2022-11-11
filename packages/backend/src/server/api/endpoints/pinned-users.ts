@@ -1,16 +1,17 @@
-import define from '../define';
-import { Users } from '@/models/index';
-import { fetchMeta } from '@/misc/fetch-meta';
-import * as Acct from 'misskey-js/built/acct';
-import { User } from '@/models/entities/user';
+import { IsNull } from 'typeorm';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UsersRepository } from '@/models/index.js';
+import * as Acct from '@/misc/acct.js';
+import type { User } from '@/models/entities/User.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { MetaService } from '@/core/MetaService.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['users'],
 
 	requireCredential: false,
-
-	params: {
-	},
 
 	res: {
 		type: 'array',
@@ -23,11 +24,31 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const meta = await fetchMeta();
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	const users = await Promise.all(meta.pinnedUsers.map(acct => Users.findOne(Acct.parse(acct))));
+		private metaService: MetaService,
+		private userEntityService: UserEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const meta = await this.metaService.fetch();
 
-	return await Users.packMany(users.filter(x => x !== undefined) as User[], me, { detail: true });
-});
+			const users = await Promise.all(meta.pinnedthis.usersRepository.map(acct => Acct.parse(acct)).map(acct => this.usersRepository.findOneBy({
+				usernameLower: acct.username.toLowerCase(),
+				host: acct.host ?? IsNull(),
+			})));
+
+			return await this.userEntityService.packMany(users.filter(x => x !== undefined) as User[], me, { detail: true });
+		});
+	}
+}

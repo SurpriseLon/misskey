@@ -1,5 +1,8 @@
-import define from '../../define';
-import { Pages } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import type { PagesRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { PageEntityService } from '@/core/entities/PageEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['pages'],
@@ -17,14 +20,30 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const query = Pages.createQueryBuilder('page')
-		.where('page.visibility = \'public\'')
-		.andWhere('page.likedCount > 0')
-		.orderBy('page.likedCount', 'DESC');
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.pagesRepository)
+		private pagesRepository: PagesRepository,
 
-	const pages = await query.take(10).getMany();
+		private pageEntityService: PageEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = this.pagesRepository.createQueryBuilder('page')
+				.where('page.visibility = \'public\'')
+				.andWhere('page.likedCount > 0')
+				.orderBy('page.likedCount', 'DESC');
 
-	return await Pages.packMany(pages, me);
-});
+			const pages = await query.take(10).getMany();
+
+			return await this.pageEntityService.packMany(pages, me);
+		});
+	}
+}

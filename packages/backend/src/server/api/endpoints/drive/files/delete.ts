@@ -1,10 +1,10 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import { deleteFile } from '@/services/drive/delete-file';
-import { publishDriveStream } from '@/services/stream';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { DriveFiles } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { DriveFilesRepository } from '@/models/index.js';
+import { DriveService } from '@/core/DriveService.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['drive'],
@@ -13,11 +13,7 @@ export const meta = {
 
 	kind: 'write:drive',
 
-	params: {
-		fileId: {
-			validator: $.type(ID),
-		},
-	},
+	description: 'Delete an existing drive file.',
 
 	errors: {
 		noSuchFile: {
@@ -34,21 +30,40 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		fileId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['fileId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const file = await DriveFiles.findOne(ps.fileId);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
 
-	if (file == null) {
-		throw new ApiError(meta.errors.noSuchFile);
+		private driveService: DriveService,
+		private globalEventService: GlobalEventService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const file = await this.driveFilesRepository.findOneBy({ id: ps.fileId });
+
+			if (file == null) {
+				throw new ApiError(meta.errors.noSuchFile);
+			}
+
+			if ((!me.isAdmin && !me.isModerator) && (file.userId !== me.id)) {
+				throw new ApiError(meta.errors.accessDenied);
+			}
+
+			// Delete
+			await this.driveService.deleteFile(file);
+
+			// Publish fileDeleted event
+			this.globalEventService.publishDriveStream(me.id, 'fileDeleted', file.id);
+		});
 	}
-
-	if (!user.isAdmin && !user.isModerator && (file.userId !== user.id)) {
-		throw new ApiError(meta.errors.accessDenied);
-	}
-
-	// Delete
-	await deleteFile(file);
-
-	// Publish fileDeleted event
-	publishDriveStream(user.id, 'fileDeleted', file.id);
-});
+}

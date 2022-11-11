@@ -1,9 +1,10 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { DriveFile } from '@/models/entities/drive-file';
-import { DriveFiles } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import type { DriveFile } from '@/models/entities/DriveFile.js';
+import type { DriveFilesRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { DriveFileEntityService } from '@/core/entities/DriveFileEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['drive'],
@@ -12,15 +13,7 @@ export const meta = {
 
 	kind: 'read:drive',
 
-	params: {
-		fileId: {
-			validator: $.optional.type(ID),
-		},
-
-		url: {
-			validator: $.optional.str,
-		},
-	},
+	description: 'Show the properties of a drive file.',
 
 	res: {
 		type: 'object',
@@ -40,46 +33,66 @@ export const meta = {
 			code: 'ACCESS_DENIED',
 			id: '25b73c73-68b1-41d0-bad1-381cfdf6579f',
 		},
-
-		fileIdOrUrlRequired: {
-			message: 'fileId or url required.',
-			code: 'INVALID_PARAM',
-			id: '89674805-722c-440c-8d88-5641830dc3e4',
-		},
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	anyOf: [
+		{
+			properties: {
+				fileId: { type: 'string', format: 'misskey:id' },
+			},
+			required: ['fileId'],
+		},
+		{
+			properties: {
+				url: { type: 'string' },
+			},
+			required: ['url'],
+		},
+	],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	let file: DriveFile | undefined;
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
 
-	if (ps.fileId) {
-		file = await DriveFiles.findOne(ps.fileId);
-	} else if (ps.url) {
-		file = await DriveFiles.findOne({
-			where: [{
-				url: ps.url,
-			}, {
-				webpublicUrl: ps.url,
-			}, {
-				thumbnailUrl: ps.url,
-			}],
+		private driveFileEntityService: DriveFileEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			let file: DriveFile | null = null;
+
+			if (ps.fileId) {
+				file = await this.driveFilesRepository.findOneBy({ id: ps.fileId });
+			} else if (ps.url) {
+				file = await this.driveFilesRepository.findOne({
+					where: [{
+						url: ps.url,
+					}, {
+						webpublicUrl: ps.url,
+					}, {
+						thumbnailUrl: ps.url,
+					}],
+				});
+			}
+
+			if (file == null) {
+				throw new ApiError(meta.errors.noSuchFile);
+			}
+
+			if ((!me.isAdmin && !me.isModerator) && (file.userId !== me.id)) {
+				throw new ApiError(meta.errors.accessDenied);
+			}
+
+			return await this.driveFileEntityService.pack(file, {
+				detail: true,
+				withUser: true,
+				self: true,
+			});
 		});
-	} else {
-		throw new ApiError(meta.errors.fileIdOrUrlRequired);
 	}
-
-	if (file == null) {
-		throw new ApiError(meta.errors.noSuchFile);
-	}
-
-	if (!user.isAdmin && !user.isModerator && (file.userId !== user.id)) {
-		throw new ApiError(meta.errors.accessDenied);
-	}
-
-	return await DriveFiles.pack(file, {
-		detail: true,
-		withUser: true,
-		self: true,
-	});
-});
+}

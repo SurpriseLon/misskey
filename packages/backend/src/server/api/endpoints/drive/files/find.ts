@@ -1,7 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { DriveFiles } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { IsNull } from 'typeorm';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { DriveFilesRepository } from '@/models/index.js';
+import { DriveFileEntityService } from '@/core/entities/DriveFileEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	requireCredential: true,
@@ -10,16 +12,7 @@ export const meta = {
 
 	kind: 'read:drive',
 
-	params: {
-		name: {
-			validator: $.str,
-		},
-
-		folderId: {
-			validator: $.optional.nullable.type(ID),
-			default: null,
-		},
-	},
+	description: 'Search for a drive file by the given parameters.',
 
 	res: {
 		type: 'array',
@@ -32,13 +25,32 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const files = await DriveFiles.find({
-		name: ps.name,
-		userId: user.id,
-		folderId: ps.folderId,
-	});
+export const paramDef = {
+	type: 'object',
+	properties: {
+		name: { type: 'string' },
+		folderId: { type: 'string', format: 'misskey:id', nullable: true, default: null },
+	},
+	required: ['name'],
+} as const;
 
-	return await Promise.all(files.map(file => DriveFiles.pack(file, { self: true })));
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
+
+		private driveFileEntityService: DriveFileEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const files = await this.driveFilesRepository.findBy({
+				name: ps.name,
+				userId: me.id,
+				folderId: ps.folderId ?? IsNull(),
+			});
+
+			return await Promise.all(files.map(file => this.driveFileEntityService.pack(file, { self: true })));
+		});
+	}
+}

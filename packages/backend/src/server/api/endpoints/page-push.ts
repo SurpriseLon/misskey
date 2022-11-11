@@ -1,27 +1,15 @@
-import $ from 'cafy';
-import define from '../define';
-import { ID } from '@/misc/cafy-id';
-import { publishMainStream } from '@/services/stream';
-import { Users, Pages } from '@/models/index';
-import { ApiError } from '../error';
+import { Inject, Injectable } from '@nestjs/common';
+import type { PagesRepository } from '@/models/index.js';
+import type { UsersRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../error.js';
 
 export const meta = {
 	requireCredential: true,
 	secure: true,
-
-	params: {
-		pageId: {
-			validator: $.type(ID),
-		},
-
-		event: {
-			validator: $.str,
-		},
-
-		var: {
-			validator: $.optional.nullable.any,
-		},
-	},
 
 	errors: {
 		noSuchPage: {
@@ -32,20 +20,41 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const page = await Pages.findOne(ps.pageId);
-	if (page == null) {
-		throw new ApiError(meta.errors.noSuchPage);
-	}
+export const paramDef = {
+	type: 'object',
+	properties: {
+		pageId: { type: 'string', format: 'misskey:id' },
+		event: { type: 'string' },
+		var: {},
+	},
+	required: ['pageId', 'event'],
+} as const;
 
-	publishMainStream(page.userId, 'pageEvent', {
-		pageId: ps.pageId,
-		event: ps.event,
-		var: ps.var,
-		userId: user.id,
-		user: await Users.pack(user.id, { id: page.userId }, {
-			detail: true,
-		}),
-	});
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.pagesRepository)
+		private pagesRepository: PagesRepository,
+
+		private userEntityService: UserEntityService,
+		private globalEventService: GlobalEventService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const page = await this.pagesRepository.findOneBy({ id: ps.pageId });
+			if (page == null) {
+				throw new ApiError(meta.errors.noSuchPage);
+			}
+
+			this.globalEventService.publishMainStream(page.userId, 'pageEvent', {
+				pageId: ps.pageId,
+				event: ps.event,
+				var: ps.var,
+				userId: me.id,
+				user: await this.userEntityService.pack(me.id, { id: page.userId }, {
+					detail: true,
+				}),
+			});
+		});
+	}
+}

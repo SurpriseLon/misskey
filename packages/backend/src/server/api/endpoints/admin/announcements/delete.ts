@@ -1,20 +1,14 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { ID } from '@/misc/cafy-id';
-import { Announcements } from '@/models/index';
-import { ApiError } from '../../../error';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { AnnouncementsRepository } from '@/models/index.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['admin'],
 
 	requireCredential: true,
 	requireModerator: true,
-
-	params: {
-		id: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchAnnouncement: {
@@ -25,11 +19,27 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		id: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['id'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const announcement = await Announcements.findOne(ps.id);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.announcementsRepository)
+		private announcementsRepository: AnnouncementsRepository,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const announcement = await this.announcementsRepository.findOneBy({ id: ps.id });
 
-	if (announcement == null) throw new ApiError(meta.errors.noSuchAnnouncement);
+			if (announcement == null) throw new ApiError(meta.errors.noSuchAnnouncement);
 
-	await Announcements.delete(announcement.id);
-});
+			await this.announcementsRepository.delete(announcement.id);
+		});
+	}
+}

@@ -1,42 +1,19 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Users, Followings, UserProfiles } from '@/models/index';
-import { makePaginationQuery } from '../../common/make-pagination-query';
-import { toPunyNullable } from '@/misc/convert-host';
+import { IsNull } from 'typeorm';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UsersRepository, FollowingsRepository, UserProfilesRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { QueryService } from '@/core/QueryService.js';
+import { FollowingEntityService } from '@/core/entities/FollowingEntityService.js';
+import { UtilityService } from '@/core/UtilityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['users'],
 
 	requireCredential: false,
 
-	params: {
-		userId: {
-			validator: $.optional.type(ID),
-		},
-
-		username: {
-			validator: $.optional.str,
-		},
-
-		host: {
-			validator: $.optional.nullable.str,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-	},
+	description: 'Show everyone that this user is following.',
 
 	res: {
 		type: 'array',
@@ -63,43 +40,89 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+	},
+	anyOf: [
+		{
+			properties: {
+				userId: { type: 'string', format: 'misskey:id' },
+			},
+			required: ['userId'],
+		},
+		{
+			properties: {
+				username: { type: 'string' },
+				host: {
+					type: 'string',
+					nullable: true,
+					description: 'The local host is represented with `null`.',
+				},
+			},
+			required: ['username', 'host'],
+		},
+	],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const user = await Users.findOne(ps.userId != null
-		? { id: ps.userId }
-		: { usernameLower: ps.username!.toLowerCase(), host: toPunyNullable(ps.host) });
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	if (user == null) {
-		throw new ApiError(meta.errors.noSuchUser);
-	}
+		@Inject(DI.userProfilesRepository)
+		private userProfilesRepository: UserProfilesRepository,
 
-	const profile = await UserProfiles.findOneOrFail(user.id);
+		@Inject(DI.followingsRepository)
+		private followingsRepository: FollowingsRepository,
 
-	if (profile.ffVisibility === 'private') {
-		if (me == null || (me.id !== user.id)) {
-			throw new ApiError(meta.errors.forbidden);
-		}
-	} else if (profile.ffVisibility === 'followers') {
-		if (me == null) {
-			throw new ApiError(meta.errors.forbidden);
-		} else if (me.id !== user.id) {
-			const following = await Followings.findOne({
-				followeeId: user.id,
-				followerId: me.id,
-			});
-			if (following == null) {
-				throw new ApiError(meta.errors.forbidden);
+		private utilityService: UtilityService,
+		private followingEntityService: FollowingEntityService,
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const user = await this.usersRepository.findOneBy(ps.userId != null
+				? { id: ps.userId }
+				: { usernameLower: ps.username!.toLowerCase(), host: this.utilityService.toPunyNullable(ps.host) ?? IsNull() });
+
+			if (user == null) {
+				throw new ApiError(meta.errors.noSuchUser);
 			}
-		}
+
+			const profile = await this.userProfilesRepository.findOneByOrFail({ userId: user.id });
+
+			if (profile.ffVisibility === 'private') {
+				if (me == null || (me.id !== user.id)) {
+					throw new ApiError(meta.errors.forbidden);
+				}
+			} else if (profile.ffVisibility === 'followers') {
+				if (me == null) {
+					throw new ApiError(meta.errors.forbidden);
+				} else if (me.id !== user.id) {
+					const following = await this.followingsRepository.findOneBy({
+						followeeId: user.id,
+						followerId: me.id,
+					});
+					if (following == null) {
+						throw new ApiError(meta.errors.forbidden);
+					}
+				}
+			}
+
+			const query = this.queryService.makePaginationQuery(this.followingsRepository.createQueryBuilder('following'), ps.sinceId, ps.untilId)
+				.andWhere('following.followerId = :userId', { userId: user.id })
+				.innerJoinAndSelect('following.followee', 'followee');
+
+			const followings = await query
+				.take(ps.limit)
+				.getMany();
+
+			return await this.followingEntityService.packMany(followings, me, { populateFollowee: true });
+		});
 	}
-
-	const query = makePaginationQuery(Followings.createQueryBuilder('following'), ps.sinceId, ps.untilId)
-		.andWhere(`following.followerId = :userId`, { userId: user.id })
-		.innerJoinAndSelect('following.followee', 'followee');
-
-	const followings = await query
-		.take(ps.limit!)
-		.getMany();
-
-	return await Followings.packMany(followings, me, { populateFollowee: true });
-});
+}

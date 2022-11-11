@@ -1,10 +1,11 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import { publishDriveStream } from '@/services/stream';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { DriveFolders } from '@/models/index';
-import { genId } from '@/misc/gen-id';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { DriveFoldersRepository } from '@/models/index.js';
+import { IdService } from '@/core/IdService.js';
+import { DriveFolderEntityService } from '@/core/entities/DriveFolderEntityService.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['drive'],
@@ -12,17 +13,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:drive',
-
-	params: {
-		name: {
-			validator: $.optional.str.pipe(DriveFolders.validateFolderName),
-			default: 'Untitled',
-		},
-
-		parentId: {
-			validator: $.optional.nullable.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchFolder: {
@@ -39,35 +29,56 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		name: { type: 'string', default: 'Untitled', maxLength: 200 },
+		parentId: { type: 'string', format: 'misskey:id', nullable: true },
+	},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	// If the parent folder is specified
-	let parent = null;
-	if (ps.parentId) {
-		// Fetch parent folder
-		parent = await DriveFolders.findOne({
-			id: ps.parentId,
-			userId: user.id,
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFoldersRepository)
+		private driveFoldersRepository: DriveFoldersRepository,
+
+		private driveFolderEntityService: DriveFolderEntityService,
+		private idService: IdService,
+		private globalEventService: GlobalEventService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// If the parent folder is specified
+			let parent = null;
+			if (ps.parentId) {
+				// Fetch parent folder
+				parent = await this.driveFoldersRepository.findOneBy({
+					id: ps.parentId,
+					userId: me.id,
+				});
+
+				if (parent == null) {
+					throw new ApiError(meta.errors.noSuchFolder);
+				}
+			}
+
+			// Create folder
+			const folder = await this.driveFoldersRepository.insert({
+				id: this.idService.genId(),
+				createdAt: new Date(),
+				name: ps.name,
+				parentId: parent !== null ? parent.id : null,
+				userId: me.id,
+			}).then(x => this.driveFoldersRepository.findOneByOrFail(x.identifiers[0]));
+
+			const folderObj = await this.driveFolderEntityService.pack(folder);
+
+			// Publish folderCreated event
+			this.globalEventService.publishDriveStream(me.id, 'folderCreated', folderObj);
+
+			return folderObj;
 		});
-
-		if (parent == null) {
-			throw new ApiError(meta.errors.noSuchFolder);
-		}
 	}
-
-	// Create folder
-	const folder = await DriveFolders.insert({
-		id: genId(),
-		createdAt: new Date(),
-		name: ps.name,
-		parentId: parent !== null ? parent.id : null,
-		userId: user.id,
-	}).then(x => DriveFolders.findOneOrFail(x.identifiers[0]));
-
-	const folderObj = await DriveFolders.pack(folder);
-
-	// Publish folderCreated event
-	publishDriveStream(user.id, 'folderCreated', folderObj);
-
-	return folderObj;
-});
+}

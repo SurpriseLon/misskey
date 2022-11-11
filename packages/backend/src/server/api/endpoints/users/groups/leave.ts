@@ -1,8 +1,8 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { UserGroups, UserGroupJoinings } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UserGroupsRepository, UserGroupJoiningsRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['groups', 'users'],
@@ -11,11 +11,7 @@ export const meta = {
 
 	kind: 'write:user-groups',
 
-	params: {
-		groupId: {
-			validator: $.type(ID),
-		},
-	},
+	description: 'Leave a group. The owner of a group can not leave. They must transfer ownership or delete the group instead.',
 
 	errors: {
 		noSuchGroup: {
@@ -32,20 +28,39 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		groupId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['groupId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	// Fetch the group
-	const userGroup = await UserGroups.findOne({
-		id: ps.groupId,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.userGroupsRepository)
+		private userGroupsRepository: UserGroupsRepository,
 
-	if (userGroup == null) {
-		throw new ApiError(meta.errors.noSuchGroup);
+		@Inject(DI.userGroupJoiningsRepository)
+		private userGroupJoiningsRepository: UserGroupJoiningsRepository,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Fetch the group
+			const userGroup = await this.userGroupsRepository.findOneBy({
+				id: ps.groupId,
+			});
+
+			if (userGroup == null) {
+				throw new ApiError(meta.errors.noSuchGroup);
+			}
+
+			if (me.id === userGroup.userId) {
+				throw new ApiError(meta.errors.youAreOwner);
+			}
+
+			await this.userGroupJoiningsRepository.delete({ userGroupId: userGroup.id, userId: me.id });
+		});
 	}
-
-	if (me.id === userGroup.userId) {
-		throw new ApiError(meta.errors.youAreOwner);
-	}
-
-	await UserGroupJoinings.delete({ userGroupId: userGroup.id, userId: me.id });
-});
+}

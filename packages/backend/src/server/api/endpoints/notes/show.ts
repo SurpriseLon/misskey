@@ -1,20 +1,15 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { getNote } from '../../common/getters';
-import { ApiError } from '../../error';
-import { Notes } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import type { NotesRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { NoteEntityService } from '@/core/entities/NoteEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
+import { GetterService } from '@/server/api/GetterService.js';
 
 export const meta = {
 	tags: ['notes'],
 
 	requireCredential: false,
-
-	params: {
-		noteId: {
-			validator: $.type(ID),
-		},
-	},
 
 	res: {
 		type: 'object',
@@ -31,14 +26,33 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const note = await getNote(ps.noteId).catch(e => {
-		if (e.id === '9725d0ce-ba28-4dde-95a7-2cbb2c15de24') throw new ApiError(meta.errors.noSuchNote);
-		throw e;
-	});
+export const paramDef = {
+	type: 'object',
+	properties: {
+		noteId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['noteId'],
+} as const;
 
-	return await Notes.pack(note, user, {
-		detail: true,
-	});
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.notesRepository)
+		private notesRepository: NotesRepository,
+
+		private noteEntityService: NoteEntityService,
+		private getterService: GetterService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const note = await this.getterService.getNote(ps.noteId).catch(err => {
+				if (err.id === '9725d0ce-ba28-4dde-95a7-2cbb2c15de24') throw new ApiError(meta.errors.noSuchNote);
+				throw err;
+			});
+
+			return await this.noteEntityService.pack(note, me, {
+				detail: true,
+			});
+		});
+	}
+}

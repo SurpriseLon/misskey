@@ -1,8 +1,8 @@
-import $ from 'cafy';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Pages } from '@/models/index';
-import { ID } from '@/misc/cafy-id';
+import { Inject, Injectable } from '@nestjs/common';
+import type { PagesRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['pages'],
@@ -10,12 +10,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:pages',
-
-	params: {
-		pageId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchPage: {
@@ -32,15 +26,31 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const page = await Pages.findOne(ps.pageId);
-	if (page == null) {
-		throw new ApiError(meta.errors.noSuchPage);
-	}
-	if (page.userId !== user.id) {
-		throw new ApiError(meta.errors.accessDenied);
-	}
+export const paramDef = {
+	type: 'object',
+	properties: {
+		pageId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['pageId'],
+} as const;
 
-	await Pages.delete(page.id);
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.pagesRepository)
+		private pagesRepository: PagesRepository,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const page = await this.pagesRepository.findOneBy({ id: ps.pageId });
+			if (page == null) {
+				throw new ApiError(meta.errors.noSuchPage);
+			}
+			if (page.userId !== me.id) {
+				throw new ApiError(meta.errors.accessDenied);
+			}
+
+			await this.pagesRepository.delete(page.id);
+		});
+	}
+}

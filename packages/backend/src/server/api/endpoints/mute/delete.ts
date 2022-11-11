@@ -1,10 +1,10 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { getUser } from '../../common/getters';
-import { Mutings } from '@/models/index';
-import { publishUserEvent } from '@/services/stream';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { MutingsRepository } from '@/models/index.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
+import { GetterService } from '@/server/api/GetterService.js';
 
 export const meta = {
 	tags: ['account'],
@@ -12,12 +12,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:mutes',
-
-	params: {
-		userId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchUser: {
@@ -40,35 +34,54 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		userId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['userId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const muter = user;
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.mutingsRepository)
+		private mutingsRepository: MutingsRepository,
 
-	// Check if the mutee is yourself
-	if (user.id === ps.userId) {
-		throw new ApiError(meta.errors.muteeIsYourself);
+		private globalEventService: GlobalEventService,
+		private getterService: GetterService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const muter = me;
+
+			// Check if the mutee is yourself
+			if (me.id === ps.userId) {
+				throw new ApiError(meta.errors.muteeIsYourself);
+			}
+
+			// Get mutee
+			const mutee = await this.getterService.getUser(ps.userId).catch(err => {
+				if (err.id === '15348ddd-432d-49c2-8a5a-8069753becff') throw new ApiError(meta.errors.noSuchUser);
+				throw err;
+			});
+
+			// Check not muting
+			const exist = await this.mutingsRepository.findOneBy({
+				muterId: muter.id,
+				muteeId: mutee.id,
+			});
+
+			if (exist == null) {
+				throw new ApiError(meta.errors.notMuting);
+			}
+
+			// Delete mute
+			await this.mutingsRepository.delete({
+				id: exist.id,
+			});
+
+			this.globalEventService.publishUserEvent(me.id, 'unmute', mutee);
+		});
 	}
-
-	// Get mutee
-	const mutee = await getUser(ps.userId).catch(e => {
-		if (e.id === '15348ddd-432d-49c2-8a5a-8069753becff') throw new ApiError(meta.errors.noSuchUser);
-		throw e;
-	});
-
-	// Check not muting
-	const exist = await Mutings.findOne({
-		muterId: muter.id,
-		muteeId: mutee.id,
-	});
-
-	if (exist == null) {
-		throw new ApiError(meta.errors.notMuting);
-	}
-
-	// Delete mute
-	await Mutings.delete({
-		id: exist.id,
-	});
-
-	publishUserEvent(user.id, 'unmute', mutee);
-});
+}

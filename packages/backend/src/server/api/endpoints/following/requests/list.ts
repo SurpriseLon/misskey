@@ -1,5 +1,8 @@
-import define from '../../../define';
-import { FollowRequests } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { FollowRequestsRepository } from '@/models/index.js';
+import { FollowRequestEntityService } from '@/core/entities/FollowRequestEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['following', 'account'],
@@ -35,11 +38,27 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const reqs = await FollowRequests.find({
-		followeeId: user.id,
-	});
+export const paramDef = {
+	type: 'object',
+	properties: {},
+	required: [],
+} as const;
 
-	return await Promise.all(reqs.map(req => FollowRequests.pack(req)));
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.followRequestsRepository)
+		private followRequestsRepository: FollowRequestsRepository,
+
+		private followRequestEntityService: FollowRequestEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const reqs = await this.followRequestsRepository.findBy({
+				followeeId: me.id,
+			});
+
+			return await Promise.all(reqs.map(req => this.followRequestEntityService.pack(req)));
+		});
+	}
+}

@@ -1,12 +1,12 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { getUser } from '../../../common/getters';
-import { MessagingMessages, DriveFiles, UserGroups, UserGroupJoinings, Blockings } from '@/models/index';
-import { User } from '@/models/entities/user';
-import { UserGroup } from '@/models/entities/user-group';
-import { createMessage } from '@/services/messages/create';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { BlockingsRepository, UserGroupJoiningsRepository, DriveFilesRepository, UserGroupsRepository } from '@/models/index.js';
+import type { User } from '@/models/entities/User.js';
+import type { UserGroup } from '@/models/entities/UserGroup.js';
+import { GetterService } from '@/server/api/GetterService.js';
+import { MessagingService } from '@/core/MessagingService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['messaging'],
@@ -14,24 +14,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:messaging',
-
-	params: {
-		userId: {
-			validator: $.optional.type(ID),
-		},
-
-		groupId: {
-			validator: $.optional.type(ID),
-		},
-
-		text: {
-			validator: $.optional.str.pipe(MessagingMessages.validateText),
-		},
-
-		fileId: {
-			validator: $.optional.type(ID),
-		},
-	},
 
 	res: {
 		type: 'object',
@@ -84,66 +66,108 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		text: { type: 'string', nullable: true, maxLength: 3000 },
+		fileId: { type: 'string', format: 'misskey:id' },
+	},
+	anyOf: [
+		{
+			properties: {
+				userId: { type: 'string', format: 'misskey:id' },
+			},
+			required: ['userId'],
+		},
+		{
+			properties: {
+				groupId: { type: 'string', format: 'misskey:id' },
+			},
+			required: ['groupId'],
+		},
+	],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	let recipientUser: User | undefined;
-	let recipientGroup: UserGroup | undefined;
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.userGroupsRepository)
+		private userGroupsRepository: UserGroupsRepository,
 
-	if (ps.userId != null) {
-		// Myself
-		if (ps.userId === user.id) {
-			throw new ApiError(meta.errors.recipientIsYourself);
-		}
+		@Inject(DI.userGroupJoiningsRepository)
+		private userGroupJoiningsRepository: UserGroupJoiningsRepository,
 
-		// Fetch recipient (user)
-		recipientUser = await getUser(ps.userId).catch(e => {
-			if (e.id === '15348ddd-432d-49c2-8a5a-8069753becff') throw new ApiError(meta.errors.noSuchUser);
-			throw e;
+		@Inject(DI.blockingsRepository)
+		private blockingsRepository: BlockingsRepository,
+
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
+
+		private getterService: GetterService,
+		private messagingService: MessagingService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			let recipientUser: User | null;
+			let recipientGroup: UserGroup | null;
+
+			if (ps.userId != null) {
+				// Myself
+				if (ps.userId === me.id) {
+					throw new ApiError(meta.errors.recipientIsYourself);
+				}
+
+				// Fetch recipient (user)
+				recipientUser = await this.getterService.getUser(ps.userId).catch(err => {
+					if (err.id === '15348ddd-432d-49c2-8a5a-8069753becff') throw new ApiError(meta.errors.noSuchUser);
+					throw err;
+				});
+
+				// Check blocking
+				const block = await this.blockingsRepository.findOneBy({
+					blockerId: recipientUser.id,
+					blockeeId: me.id,
+				});
+				if (block) {
+					throw new ApiError(meta.errors.youHaveBeenBlocked);
+				}
+			} else if (ps.groupId != null) {
+				// Fetch recipient (group)
+				recipientGroup = await this.userGroupsRepository.findOneBy({ id: ps.groupId! });
+
+				if (recipientGroup == null) {
+					throw new ApiError(meta.errors.noSuchGroup);
+				}
+
+				// check joined
+				const joining = await this.userGroupJoiningsRepository.findOneBy({
+					userId: me.id,
+					userGroupId: recipientGroup.id,
+				});
+
+				if (joining == null) {
+					throw new ApiError(meta.errors.groupAccessDenied);
+				}
+			}
+
+			let file = null;
+			if (ps.fileId != null) {
+				file = await this.driveFilesRepository.findOneBy({
+					id: ps.fileId,
+					userId: me.id,
+				});
+
+				if (file == null) {
+					throw new ApiError(meta.errors.noSuchFile);
+				}
+			}
+
+			// テキストが無いかつ添付ファイルも無かったらエラー
+			if (ps.text == null && file == null) {
+				throw new ApiError(meta.errors.contentRequired);
+			}
+
+			return await this.messagingService.createMessage(me, recipientUser, recipientGroup, ps.text, file);
 		});
-
-		// Check blocking
-		const block = await Blockings.findOne({
-			blockerId: recipientUser.id,
-			blockeeId: user.id,
-		});
-		if (block) {
-			throw new ApiError(meta.errors.youHaveBeenBlocked);
-		}
-	} else if (ps.groupId != null) {
-		// Fetch recipient (group)
-		recipientGroup = await UserGroups.findOne(ps.groupId);
-
-		if (recipientGroup == null) {
-			throw new ApiError(meta.errors.noSuchGroup);
-		}
-
-		// check joined
-		const joining = await UserGroupJoinings.findOne({
-			userId: user.id,
-			userGroupId: recipientGroup.id,
-		});
-
-		if (joining == null) {
-			throw new ApiError(meta.errors.groupAccessDenied);
-		}
 	}
-
-	let file = null;
-	if (ps.fileId != null) {
-		file = await DriveFiles.findOne({
-			id: ps.fileId,
-			userId: user.id,
-		});
-
-		if (file == null) {
-			throw new ApiError(meta.errors.noSuchFile);
-		}
-	}
-
-	// テキストが無いかつ添付ファイルも無かったらエラー
-	if (ps.text == null && file == null) {
-		throw new ApiError(meta.errors.contentRequired);
-	}
-
-	return await createMessage(user, recipientUser, recipientGroup, ps.text, file);
-});
+}

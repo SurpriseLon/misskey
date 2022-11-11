@@ -1,12 +1,10 @@
-import define from '../define';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
 
 export const meta = {
 	requireCredential: false,
 
 	tags: ['meta'],
-
-	params: {
-	},
 
 	res: {
 		type: 'object',
@@ -20,9 +18,21 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async () => {
-	return {
-		pong: Date.now(),
-	};
-});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+	) {
+		super(meta, paramDef, async () => {
+			return {
+				pong: Date.now(),
+			};
+		});
+	}
+}

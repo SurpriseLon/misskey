@@ -1,12 +1,10 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ClipNotes, Clips, Notes } from '@/models/index';
-import { makePaginationQuery } from '../../common/make-pagination-query';
-import { generateVisibilityQuery } from '../../common/generate-visibility-query';
-import { generateMutedUserQuery } from '../../common/generate-muted-user-query';
-import { ApiError } from '../../error';
-import { generateBlockedUserQuery } from '../../common/generate-block-query';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { NotesRepository, ClipsRepository, ClipNotesRepository } from '@/models/index.js';
+import { QueryService } from '@/core/QueryService.js';
+import { NoteEntityService } from '@/core/entities/NoteEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['account', 'notes', 'clips'],
@@ -14,25 +12,6 @@ export const meta = {
 	requireCredential: false,
 
 	kind: 'read:account',
-
-	params: {
-		clipId: {
-			validator: $.type(ID),
-		},
-
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchClip: {
@@ -53,42 +32,72 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		clipId: { type: 'string', format: 'misskey:id' },
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['clipId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const clip = await Clips.findOne({
-		id: ps.clipId,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.clipsRepository)
+		private clipsRepository: ClipsRepository,
 
-	if (clip == null) {
-		throw new ApiError(meta.errors.noSuchClip);
+		@Inject(DI.notesRepository)
+		private notesRepository: NotesRepository,
+
+		@Inject(DI.clipNotesRepository)
+		private clipNotesRepository: ClipNotesRepository,
+
+		private noteEntityService: NoteEntityService,
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const clip = await this.clipsRepository.findOneBy({
+				id: ps.clipId,
+			});
+
+			if (clip == null) {
+				throw new ApiError(meta.errors.noSuchClip);
+			}
+
+			if (!clip.isPublic && (me == null || (clip.userId !== me.id))) {
+				throw new ApiError(meta.errors.noSuchClip);
+			}
+
+			const query = this.queryService.makePaginationQuery(this.notesRepository.createQueryBuilder('note'), ps.sinceId, ps.untilId)
+				.innerJoin(this.clipNotesRepository.metadata.targetName, 'clipNote', 'clipNote.noteId = note.id')
+				.innerJoinAndSelect('note.user', 'user')
+				.leftJoinAndSelect('user.avatar', 'avatar')
+				.leftJoinAndSelect('user.banner', 'banner')
+				.leftJoinAndSelect('note.reply', 'reply')
+				.leftJoinAndSelect('note.renote', 'renote')
+				.leftJoinAndSelect('reply.user', 'replyUser')
+				.leftJoinAndSelect('replyUser.avatar', 'replyUserAvatar')
+				.leftJoinAndSelect('replyUser.banner', 'replyUserBanner')
+				.leftJoinAndSelect('renote.user', 'renoteUser')
+				.leftJoinAndSelect('renoteUser.avatar', 'renoteUserAvatar')
+				.leftJoinAndSelect('renoteUser.banner', 'renoteUserBanner')
+				.andWhere('clipNote.clipId = :clipId', { clipId: clip.id });
+
+			if (me) {
+				this.queryService.generateVisibilityQuery(query, me);
+				this.queryService.generateMutedUserQuery(query, me);
+				this.queryService.generateBlockedUserQuery(query, me);
+			}
+
+			const notes = await query
+				.take(ps.limit)
+				.getMany();
+
+			return await this.noteEntityService.packMany(notes, me);
+		});
 	}
-
-	if (!clip.isPublic && (user == null || (clip.userId !== user.id))) {
-		throw new ApiError(meta.errors.noSuchClip);
-	}
-
-	const clipQuery = ClipNotes.createQueryBuilder('joining')
-		.select('joining.noteId')
-		.where('joining.clipId = :clipId', { clipId: clip.id });
-
-	const query = makePaginationQuery(Notes.createQueryBuilder('note'), ps.sinceId, ps.untilId)
-		.andWhere(`note.id IN (${ clipQuery.getQuery() })`)
-		.innerJoinAndSelect('note.user', 'user')
-		.leftJoinAndSelect('note.reply', 'reply')
-		.leftJoinAndSelect('note.renote', 'renote')
-		.leftJoinAndSelect('reply.user', 'replyUser')
-		.leftJoinAndSelect('renote.user', 'renoteUser')
-		.setParameters(clipQuery.getParameters());
-
-	if (user) {
-		generateVisibilityQuery(query, user);
-		generateMutedUserQuery(query, user);
-		generateBlockedUserQuery(query, user);
-	}
-
-	const notes = await query
-		.take(ps.limit!)
-		.getMany();
-
-	return await Notes.packMany(notes, user);
-});
+}

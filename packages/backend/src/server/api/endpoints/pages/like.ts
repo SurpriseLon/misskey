@@ -1,9 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Pages, PageLikes } from '@/models/index';
-import { genId } from '@/misc/gen-id';
+import { Inject, Injectable } from '@nestjs/common';
+import type { PagesRepository, PageLikesRepository } from '@/models/index.js';
+import { IdService } from '@/core/IdService.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['pages'],
@@ -11,12 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:page-likes',
-
-	params: {
-		pageId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchPage: {
@@ -39,34 +33,55 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		pageId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['pageId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const page = await Pages.findOne(ps.pageId);
-	if (page == null) {
-		throw new ApiError(meta.errors.noSuchPage);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.pagesRepository)
+		private pagesRepository: PagesRepository,
+
+		@Inject(DI.pageLikesRepository)
+		private pageLikesRepository: PageLikesRepository,
+
+		private idService: IdService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const page = await this.pagesRepository.findOneBy({ id: ps.pageId });
+			if (page == null) {
+				throw new ApiError(meta.errors.noSuchPage);
+			}
+
+			if (page.userId === me.id) {
+				throw new ApiError(meta.errors.yourPage);
+			}
+
+			// if already liked
+			const exist = await this.pageLikesRepository.findOneBy({
+				pageId: page.id,
+				userId: me.id,
+			});
+
+			if (exist != null) {
+				throw new ApiError(meta.errors.alreadyLiked);
+			}
+
+			// Create like
+			await this.pageLikesRepository.insert({
+				id: this.idService.genId(),
+				createdAt: new Date(),
+				pageId: page.id,
+				userId: me.id,
+			});
+
+			this.pagesRepository.increment({ id: page.id }, 'likedCount', 1);
+		});
 	}
-
-	if (page.userId === user.id) {
-		throw new ApiError(meta.errors.yourPage);
-	}
-
-	// if already liked
-	const exist = await PageLikes.findOne({
-		pageId: page.id,
-		userId: user.id,
-	});
-
-	if (exist != null) {
-		throw new ApiError(meta.errors.alreadyLiked);
-	}
-
-	// Create like
-	await PageLikes.insert({
-		id: genId(),
-		createdAt: new Date(),
-		pageId: page.id,
-		userId: user.id,
-	});
-
-	Pages.increment({ id: page.id }, 'likedCount', 1);
-});
+}

@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { DriveFiles } from '@/models/index';
-import { makePaginationQuery } from '../../common/make-pagination-query';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { DriveFilesRepository } from '@/models/index.js';
+import { QueryService } from '@/core/QueryService.js';
+import { DriveFileEntityService } from '@/core/entities/DriveFileEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['drive'],
@@ -10,30 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'read:drive',
-
-	params: {
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-
-		folderId: {
-			validator: $.optional.nullable.type(ID),
-			default: null,
-		},
-
-		type: {
-			validator: $.optional.nullable.str.match(/^[a-zA-Z\/\-*]+$/),
-		},
-	},
 
 	res: {
 		type: 'array',
@@ -46,26 +23,49 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+		folderId: { type: 'string', format: 'misskey:id', nullable: true, default: null },
+		type: { type: 'string', nullable: true, pattern: /^[a-zA-Z\/\-*]+$/.toString().slice(1, -1) },
+	},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const query = makePaginationQuery(DriveFiles.createQueryBuilder('file'), ps.sinceId, ps.untilId)
-		.andWhere('file.userId = :userId', { userId: user.id });
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
 
-	if (ps.folderId) {
-		query.andWhere('file.folderId = :folderId', { folderId: ps.folderId });
-	} else {
-		query.andWhere('file.folderId IS NULL');
+		private driveFileEntityService: DriveFileEntityService,
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = this.queryService.makePaginationQuery(this.driveFilesRepository.createQueryBuilder('file'), ps.sinceId, ps.untilId)
+				.andWhere('file.userId = :userId', { userId: me.id });
+
+			if (ps.folderId) {
+				query.andWhere('file.folderId = :folderId', { folderId: ps.folderId });
+			} else {
+				query.andWhere('file.folderId IS NULL');
+			}
+
+			if (ps.type) {
+				if (ps.type.endsWith('/*')) {
+					query.andWhere('file.type like :type', { type: ps.type.replace('/*', '/') + '%' });
+				} else {
+					query.andWhere('file.type = :type', { type: ps.type });
+				}
+			}
+
+			const files = await query.take(ps.limit).getMany();
+
+			return await this.driveFileEntityService.packMany(files, { detail: false, self: true });
+		});
 	}
-
-	if (ps.type) {
-		if (ps.type.endsWith('/*')) {
-			query.andWhere('file.type like :type', { type: ps.type.replace('/*', '/') + '%' });
-		} else {
-			query.andWhere('file.type = :type', { type: ps.type });
-		}
-	}
-
-	const files = await query.take(ps.limit!).getMany();
-
-	return await DriveFiles.packMany(files, { detail: false, self: true });
-});
+}

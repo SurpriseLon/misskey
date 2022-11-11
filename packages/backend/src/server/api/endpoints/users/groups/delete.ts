@@ -1,8 +1,8 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { UserGroups } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UserGroupsRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['groups'],
@@ -11,11 +11,7 @@ export const meta = {
 
 	kind: 'write:user-groups',
 
-	params: {
-		groupId: {
-			validator: $.type(ID),
-		},
-	},
+	description: 'Delete an existing group.',
 
 	errors: {
 		noSuchGroup: {
@@ -26,16 +22,32 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		groupId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['groupId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const userGroup = await UserGroups.findOne({
-		id: ps.groupId,
-		userId: user.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.userGroupsRepository)
+		private userGroupsRepository: UserGroupsRepository,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const userGroup = await this.userGroupsRepository.findOneBy({
+				id: ps.groupId,
+				userId: me.id,
+			});
 
-	if (userGroup == null) {
-		throw new ApiError(meta.errors.noSuchGroup);
+			if (userGroup == null) {
+				throw new ApiError(meta.errors.noSuchGroup);
+			}
+
+			await this.userGroupsRepository.delete(userGroup.id);
+		});
 	}
-
-	await UserGroups.delete(userGroup.id);
-});
+}

@@ -1,39 +1,55 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { Users } from '@/models/index';
-import { insertModerationLog } from '@/services/insert-moderation-log';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { ModerationLogService } from '@/core/ModerationLogService.js';
+import type { UsersRepository } from '@/models/index.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['admin'],
 
 	requireCredential: true,
 	requireModerator: true,
+} as const;
 
-	params: {
-		userId: {
-			validator: $.type(ID),
-		},
+export const paramDef = {
+	type: 'object',
+	properties: {
+		userId: { type: 'string', format: 'misskey:id' },
 	},
+	required: ['userId'],
 } as const;
 
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const user = await Users.findOne(ps.userId as string);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	if (user == null) {
-		throw new Error('user not found');
+		private moderationLogService: ModerationLogService,
+		private globalEventService: GlobalEventService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const user = await this.usersRepository.findOneBy({ id: ps.userId });
+
+			if (user == null) {
+				throw new Error('user not found');
+			}
+
+			if (user.isAdmin) {
+				throw new Error('cannot silence admin');
+			}
+
+			await this.usersRepository.update(user.id, {
+				isSilenced: true,
+			});
+
+			this.globalEventService.publishInternalEvent('userChangeSilencedState', { id: user.id, isSilenced: true });
+
+			this.moderationLogService.insertModerationLog(me, 'silence', {
+				targetId: user.id,
+			});
+		});
 	}
-
-	if (user.isAdmin) {
-		throw new Error('cannot silence admin');
-	}
-
-	await Users.update(user.id, {
-		isSilenced: true,
-	});
-
-	insertModerationLog(me, 'silence', {
-		targetId: user.id,
-	});
-});
+}

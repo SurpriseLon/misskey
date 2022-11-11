@@ -1,41 +1,14 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { ID } from '@/misc/cafy-id';
-import { Ads } from '@/models/index';
-import { ApiError } from '../../../error';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { AdsRepository } from '@/models/index.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['admin'],
 
 	requireCredential: true,
 	requireModerator: true,
-
-	params: {
-		id: {
-			validator: $.type(ID),
-		},
-		memo: {
-			validator: $.str,
-		},
-		url: {
-			validator: $.str.min(1),
-		},
-		imageUrl: {
-			validator: $.str.min(1),
-		},
-		place: {
-			validator: $.str,
-		},
-		priority: {
-			validator: $.str,
-		},
-		ratio: {
-			validator: $.num.int().min(0),
-		},
-		expiresAt: {
-			validator: $.num.int(),
-		},
-	},
 
 	errors: {
 		noSuchAd: {
@@ -46,19 +19,42 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		id: { type: 'string', format: 'misskey:id' },
+		memo: { type: 'string' },
+		url: { type: 'string', minLength: 1 },
+		imageUrl: { type: 'string', minLength: 1 },
+		place: { type: 'string' },
+		priority: { type: 'string' },
+		ratio: { type: 'integer' },
+		expiresAt: { type: 'integer' },
+	},
+	required: ['id', 'memo', 'url', 'imageUrl', 'place', 'priority', 'ratio', 'expiresAt'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const ad = await Ads.findOne(ps.id);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private adsRepository: AdsRepository,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const ad = await this.adsRepository.findOneBy({ id: ps.id });
 
-	if (ad == null) throw new ApiError(meta.errors.noSuchAd);
+			if (ad == null) throw new ApiError(meta.errors.noSuchAd);
 
-	await Ads.update(ad.id, {
-		url: ps.url,
-		place: ps.place,
-		priority: ps.priority,
-		ratio: ps.ratio,
-		memo: ps.memo,
-		imageUrl: ps.imageUrl,
-		expiresAt: new Date(ps.expiresAt),
-	});
-});
+			await this.adsRepository.update(ad.id, {
+				url: ps.url,
+				place: ps.place,
+				priority: ps.priority,
+				ratio: ps.ratio,
+				memo: ps.memo,
+				imageUrl: ps.imageUrl,
+				expiresAt: new Date(ps.expiresAt),
+			});
+		});
+	}
+}

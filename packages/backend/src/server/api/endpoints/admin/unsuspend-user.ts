@@ -1,38 +1,51 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { Users } from '@/models/index';
-import { insertModerationLog } from '@/services/insert-moderation-log';
-import { doPostUnsuspend } from '@/services/unsuspend-user';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { UsersRepository } from '@/models/index.js';
+import { ModerationLogService } from '@/core/ModerationLogService.js';
+import { UserSuspendService } from '@/core/UserSuspendService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['admin'],
 
 	requireCredential: true,
 	requireModerator: true,
+} as const;
 
-	params: {
-		userId: {
-			validator: $.type(ID),
-		},
+export const paramDef = {
+	type: 'object',
+	properties: {
+		userId: { type: 'string', format: 'misskey:id' },
 	},
+	required: ['userId'],
 } as const;
 
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const user = await Users.findOne(ps.userId as string);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	if (user == null) {
-		throw new Error('user not found');
+		private userSuspendService: UserSuspendService,
+		private moderationLogService: ModerationLogService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const user = await this.usersRepository.findOneBy({ id: ps.userId });
+
+			if (user == null) {
+				throw new Error('user not found');
+			}
+
+			await this.usersRepository.update(user.id, {
+				isSuspended: false,
+			});
+
+			this.moderationLogService.insertModerationLog(me, 'unsuspend', {
+				targetId: user.id,
+			});
+
+			this.userSuspendService.doPostUnsuspend(user);
+		});
 	}
-
-	await Users.update(user.id, {
-		isSuspended: false,
-	});
-
-	insertModerationLog(me, 'unsuspend', {
-		targetId: user.id,
-	});
-
-	doPostUnsuspend(user);
-});
+}

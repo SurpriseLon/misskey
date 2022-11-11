@@ -1,126 +1,194 @@
-import { getRepository, getCustomRepository } from 'typeorm';
-import { Announcement } from './entities/announcement';
-import { AnnouncementRead } from './entities/announcement-read';
-import { Instance } from './entities/instance';
-import { Poll } from './entities/poll';
-import { PollVote } from './entities/poll-vote';
-import { Meta } from './entities/meta';
-import { SwSubscription } from './entities/sw-subscription';
-import { NoteWatching } from './entities/note-watching';
-import { NoteThreadMuting } from './entities/note-thread-muting';
-import { NoteUnread } from './entities/note-unread';
-import { RegistrationTicket } from './entities/registration-tickets';
-import { UserRepository } from './repositories/user';
-import { NoteRepository } from './repositories/note';
-import { DriveFileRepository } from './repositories/drive-file';
-import { DriveFolderRepository } from './repositories/drive-folder';
-import { AccessToken } from './entities/access-token';
-import { UserNotePining } from './entities/user-note-pining';
-import { SigninRepository } from './repositories/signin';
-import { MessagingMessageRepository } from './repositories/messaging-message';
-import { UserListRepository } from './repositories/user-list';
-import { UserListJoining } from './entities/user-list-joining';
-import { UserGroupRepository } from './repositories/user-group';
-import { UserGroupJoining } from './entities/user-group-joining';
-import { UserGroupInvitationRepository } from './repositories/user-group-invitation';
-import { FollowRequestRepository } from './repositories/follow-request';
-import { MutingRepository } from './repositories/muting';
-import { BlockingRepository } from './repositories/blocking';
-import { NoteReactionRepository } from './repositories/note-reaction';
-import { NotificationRepository } from './repositories/notification';
-import { NoteFavoriteRepository } from './repositories/note-favorite';
-import { UserPublickey } from './entities/user-publickey';
-import { UserKeypair } from './entities/user-keypair';
-import { AppRepository } from './repositories/app';
-import { FollowingRepository } from './repositories/following';
-import { AbuseUserReportRepository } from './repositories/abuse-user-report';
-import { AuthSessionRepository } from './repositories/auth-session';
-import { UserProfile } from './entities/user-profile';
-import { AttestationChallenge } from './entities/attestation-challenge';
-import { UserSecurityKey } from './entities/user-security-key';
-import { HashtagRepository } from './repositories/hashtag';
-import { PageRepository } from './repositories/page';
-import { PageLikeRepository } from './repositories/page-like';
-import { GalleryPostRepository } from './repositories/gallery-post';
-import { GalleryLikeRepository } from './repositories/gallery-like';
-import { ModerationLogRepository } from './repositories/moderation-logs';
-import { UsedUsername } from './entities/used-username';
-import { ClipRepository } from './repositories/clip';
-import { ClipNote } from './entities/clip-note';
-import { AntennaRepository } from './repositories/antenna';
-import { AntennaNote } from './entities/antenna-note';
-import { PromoNote } from './entities/promo-note';
-import { PromoRead } from './entities/promo-read';
-import { EmojiRepository } from './repositories/emoji';
-import { RelayRepository } from './repositories/relay';
-import { ChannelRepository } from './repositories/channel';
-import { MutedNote } from './entities/muted-note';
-import { ChannelFollowing } from './entities/channel-following';
-import { ChannelNotePining } from './entities/channel-note-pining';
-import { RegistryItem } from './entities/registry-item';
-import { Ad } from './entities/ad';
-import { PasswordResetRequest } from './entities/password-reset-request';
-import { UserPending } from './entities/user-pending';
+import { AbuseUserReport } from '@/models/entities/AbuseUserReport.js';
+import { AccessToken } from '@/models/entities/AccessToken.js';
+import { Ad } from '@/models/entities/Ad.js';
+import { Announcement } from '@/models/entities/Announcement.js';
+import { AnnouncementRead } from '@/models/entities/AnnouncementRead.js';
+import { Antenna } from '@/models/entities/Antenna.js';
+import { AntennaNote } from '@/models/entities/AntennaNote.js';
+import { App } from '@/models/entities/App.js';
+import { AttestationChallenge } from '@/models/entities/AttestationChallenge.js';
+import { AuthSession } from '@/models/entities/AuthSession.js';
+import { Blocking } from '@/models/entities/Blocking.js';
+import { ChannelFollowing } from '@/models/entities/ChannelFollowing.js';
+import { ChannelNotePining } from '@/models/entities/ChannelNotePining.js';
+import { Clip } from '@/models/entities/Clip.js';
+import { ClipNote } from '@/models/entities/ClipNote.js';
+import { DriveFile } from '@/models/entities/DriveFile.js';
+import { DriveFolder } from '@/models/entities/DriveFolder.js';
+import { Emoji } from '@/models/entities/Emoji.js';
+import { Following } from '@/models/entities/Following.js';
+import { FollowRequest } from '@/models/entities/FollowRequest.js';
+import { GalleryLike } from '@/models/entities/GalleryLike.js';
+import { GalleryPost } from '@/models/entities/GalleryPost.js';
+import { Hashtag } from '@/models/entities/Hashtag.js';
+import { Instance } from '@/models/entities/Instance.js';
+import { MessagingMessage } from '@/models/entities/MessagingMessage.js';
+import { Meta } from '@/models/entities/Meta.js';
+import { ModerationLog } from '@/models/entities/ModerationLog.js';
+import { MutedNote } from '@/models/entities/MutedNote.js';
+import { Muting } from '@/models/entities/Muting.js';
+import { Note } from '@/models/entities/Note.js';
+import { NoteFavorite } from '@/models/entities/NoteFavorite.js';
+import { NoteReaction } from '@/models/entities/NoteReaction.js';
+import { NoteThreadMuting } from '@/models/entities/NoteThreadMuting.js';
+import { NoteUnread } from '@/models/entities/NoteUnread.js';
+import { Notification } from '@/models/entities/Notification.js';
+import { Page } from '@/models/entities/Page.js';
+import { PageLike } from '@/models/entities/PageLike.js';
+import { PasswordResetRequest } from '@/models/entities/PasswordResetRequest.js';
+import { Poll } from '@/models/entities/Poll.js';
+import { PollVote } from '@/models/entities/PollVote.js';
+import { PromoNote } from '@/models/entities/PromoNote.js';
+import { PromoRead } from '@/models/entities/PromoRead.js';
+import { RegistrationTicket } from '@/models/entities/RegistrationTickets.js';
+import { RegistryItem } from '@/models/entities/RegistryItem.js';
+import { Relay } from '@/models/entities/Relay.js';
+import { Signin } from '@/models/entities/Signin.js';
+import { SwSubscription } from '@/models/entities/SwSubscription.js';
+import { UsedUsername } from '@/models/entities/UsedUsername.js';
+import { User } from '@/models/entities/User.js';
+import { UserGroup } from '@/models/entities/UserGroup.js';
+import { UserGroupInvitation } from '@/models/entities/UserGroupInvitation.js';
+import { UserGroupJoining } from '@/models/entities/UserGroupJoining.js';
+import { UserIp } from '@/models/entities/UserIp.js';
+import { UserKeypair } from '@/models/entities/UserKeypair.js';
+import { UserList } from '@/models/entities/UserList.js';
+import { UserListJoining } from '@/models/entities/UserListJoining.js';
+import { UserNotePining } from '@/models/entities/UserNotePining.js';
+import { UserPending } from '@/models/entities/UserPending.js';
+import { UserProfile } from '@/models/entities/UserProfile.js';
+import { UserPublickey } from '@/models/entities/UserPublickey.js';
+import { UserSecurityKey } from '@/models/entities/UserSecurityKey.js';
+import { Webhook } from '@/models/entities/Webhook.js';
+import { Channel } from '@/models/entities/Channel.js';
+import type { Repository } from 'typeorm';
 
-export const Announcements = getRepository(Announcement);
-export const AnnouncementReads = getRepository(AnnouncementRead);
-export const Apps = getCustomRepository(AppRepository);
-export const Notes = getCustomRepository(NoteRepository);
-export const NoteFavorites = getCustomRepository(NoteFavoriteRepository);
-export const NoteWatchings = getRepository(NoteWatching);
-export const NoteThreadMutings = getRepository(NoteThreadMuting);
-export const NoteReactions = getCustomRepository(NoteReactionRepository);
-export const NoteUnreads = getRepository(NoteUnread);
-export const Polls = getRepository(Poll);
-export const PollVotes = getRepository(PollVote);
-export const Users = getCustomRepository(UserRepository);
-export const UserProfiles = getRepository(UserProfile);
-export const UserKeypairs = getRepository(UserKeypair);
-export const UserPendings = getRepository(UserPending);
-export const AttestationChallenges = getRepository(AttestationChallenge);
-export const UserSecurityKeys = getRepository(UserSecurityKey);
-export const UserPublickeys = getRepository(UserPublickey);
-export const UserLists = getCustomRepository(UserListRepository);
-export const UserListJoinings = getRepository(UserListJoining);
-export const UserGroups = getCustomRepository(UserGroupRepository);
-export const UserGroupJoinings = getRepository(UserGroupJoining);
-export const UserGroupInvitations = getCustomRepository(UserGroupInvitationRepository);
-export const UserNotePinings = getRepository(UserNotePining);
-export const UsedUsernames = getRepository(UsedUsername);
-export const Followings = getCustomRepository(FollowingRepository);
-export const FollowRequests = getCustomRepository(FollowRequestRepository);
-export const Instances = getRepository(Instance);
-export const Emojis = getCustomRepository(EmojiRepository);
-export const DriveFiles = getCustomRepository(DriveFileRepository);
-export const DriveFolders = getCustomRepository(DriveFolderRepository);
-export const Notifications = getCustomRepository(NotificationRepository);
-export const Metas = getRepository(Meta);
-export const Mutings = getCustomRepository(MutingRepository);
-export const Blockings = getCustomRepository(BlockingRepository);
-export const SwSubscriptions = getRepository(SwSubscription);
-export const Hashtags = getCustomRepository(HashtagRepository);
-export const AbuseUserReports = getCustomRepository(AbuseUserReportRepository);
-export const RegistrationTickets = getRepository(RegistrationTicket);
-export const AuthSessions = getCustomRepository(AuthSessionRepository);
-export const AccessTokens = getRepository(AccessToken);
-export const Signins = getCustomRepository(SigninRepository);
-export const MessagingMessages = getCustomRepository(MessagingMessageRepository);
-export const Pages = getCustomRepository(PageRepository);
-export const PageLikes = getCustomRepository(PageLikeRepository);
-export const GalleryPosts = getCustomRepository(GalleryPostRepository);
-export const GalleryLikes = getCustomRepository(GalleryLikeRepository);
-export const ModerationLogs = getCustomRepository(ModerationLogRepository);
-export const Clips = getCustomRepository(ClipRepository);
-export const ClipNotes = getRepository(ClipNote);
-export const Antennas = getCustomRepository(AntennaRepository);
-export const AntennaNotes = getRepository(AntennaNote);
-export const PromoNotes = getRepository(PromoNote);
-export const PromoReads = getRepository(PromoRead);
-export const Relays = getCustomRepository(RelayRepository);
-export const MutedNotes = getRepository(MutedNote);
-export const Channels = getCustomRepository(ChannelRepository);
-export const ChannelFollowings = getRepository(ChannelFollowing);
-export const ChannelNotePinings = getRepository(ChannelNotePining);
-export const RegistryItems = getRepository(RegistryItem);
-export const Ads = getRepository(Ad);
-export const PasswordResetRequests = getRepository(PasswordResetRequest);
+export {
+	AbuseUserReport,
+	AccessToken,
+	Ad,
+	Announcement,
+	AnnouncementRead,
+	Antenna,
+	AntennaNote,
+	App,
+	AttestationChallenge,
+	AuthSession,
+	Blocking,
+	ChannelFollowing,
+	ChannelNotePining,
+	Clip,
+	ClipNote,
+	DriveFile,
+	DriveFolder,
+	Emoji,
+	Following,
+	FollowRequest,
+	GalleryLike,
+	GalleryPost,
+	Hashtag,
+	Instance,
+	MessagingMessage,
+	Meta,
+	ModerationLog,
+	MutedNote,
+	Muting,
+	Note,
+	NoteFavorite,
+	NoteReaction,
+	NoteThreadMuting,
+	NoteUnread,
+	Notification,
+	Page,
+	PageLike,
+	PasswordResetRequest,
+	Poll,
+	PollVote,
+	PromoNote,
+	PromoRead,
+	RegistrationTicket,
+	RegistryItem,
+	Relay,
+	Signin,
+	SwSubscription,
+	UsedUsername,
+	User,
+	UserGroup,
+	UserGroupInvitation,
+	UserGroupJoining,
+	UserIp,
+	UserKeypair,
+	UserList,
+	UserListJoining,
+	UserNotePining,
+	UserPending,
+	UserProfile,
+	UserPublickey,
+	UserSecurityKey,
+	Webhook,
+	Channel,
+};
+
+export type AbuseUserReportsRepository = Repository<AbuseUserReport>;
+export type AccessTokensRepository = Repository<AccessToken>;
+export type AdsRepository = Repository<Ad>;
+export type AnnouncementsRepository = Repository<Announcement>;
+export type AnnouncementReadsRepository = Repository<AnnouncementRead>;
+export type AntennasRepository = Repository<Antenna>;
+export type AntennaNotesRepository = Repository<AntennaNote>;
+export type AppsRepository = Repository<App>;
+export type AttestationChallengesRepository = Repository<AttestationChallenge>;
+export type AuthSessionsRepository = Repository<AuthSession>;
+export type BlockingsRepository = Repository<Blocking>;
+export type ChannelFollowingsRepository = Repository<ChannelFollowing>;
+export type ChannelNotePiningsRepository = Repository<ChannelNotePining>;
+export type ClipsRepository = Repository<Clip>;
+export type ClipNotesRepository = Repository<ClipNote>;
+export type DriveFilesRepository = Repository<DriveFile>;
+export type DriveFoldersRepository = Repository<DriveFolder>;
+export type EmojisRepository = Repository<Emoji>;
+export type FollowingsRepository = Repository<Following>;
+export type FollowRequestsRepository = Repository<FollowRequest>;
+export type GalleryLikesRepository = Repository<GalleryLike>;
+export type GalleryPostsRepository = Repository<GalleryPost>;
+export type HashtagsRepository = Repository<Hashtag>;
+export type InstancesRepository = Repository<Instance>;
+export type MessagingMessagesRepository = Repository<MessagingMessage>;
+export type MetasRepository = Repository<Meta>;
+export type ModerationLogsRepository = Repository<ModerationLog>;
+export type MutedNotesRepository = Repository<MutedNote>;
+export type MutingsRepository = Repository<Muting>;
+export type NotesRepository = Repository<Note>;
+export type NoteFavoritesRepository = Repository<NoteFavorite>;
+export type NoteReactionsRepository = Repository<NoteReaction>;
+export type NoteThreadMutingsRepository = Repository<NoteThreadMuting>;
+export type NoteUnreadsRepository = Repository<NoteUnread>;
+export type NotificationsRepository = Repository<Notification>;
+export type PagesRepository = Repository<Page>;
+export type PageLikesRepository = Repository<PageLike>;
+export type PasswordResetRequestsRepository = Repository<PasswordResetRequest>;
+export type PollsRepository = Repository<Poll>;
+export type PollVotesRepository = Repository<PollVote>;
+export type PromoNotesRepository = Repository<PromoNote>;
+export type PromoReadsRepository = Repository<PromoRead>;
+export type RegistrationTicketsRepository = Repository<RegistrationTicket>;
+export type RegistryItemsRepository = Repository<RegistryItem>;
+export type RelaysRepository = Repository<Relay>;
+export type SigninsRepository = Repository<Signin>;
+export type SwSubscriptionsRepository = Repository<SwSubscription>;
+export type UsedUsernamesRepository = Repository<UsedUsername>;
+export type UsersRepository = Repository<User>;
+export type UserGroupsRepository = Repository<UserGroup>;
+export type UserGroupInvitationsRepository = Repository<UserGroupInvitation>;
+export type UserGroupJoiningsRepository = Repository<UserGroupJoining>;
+export type UserIpsRepository = Repository<UserIp>;
+export type UserKeypairsRepository = Repository<UserKeypair>;
+export type UserListsRepository = Repository<UserList>;
+export type UserListJoiningsRepository = Repository<UserListJoining>;
+export type UserNotePiningsRepository = Repository<UserNotePining>;
+export type UserPendingsRepository = Repository<UserPending>;
+export type UserProfilesRepository = Repository<UserProfile>;
+export type UserPublickeysRepository = Repository<UserPublickey>;
+export type UserSecurityKeysRepository = Repository<UserSecurityKey>;
+export type WebhooksRepository = Repository<Webhook>;
+export type ChannelsRepository = Repository<Channel>;

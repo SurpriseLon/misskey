@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Clips } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { ClipsRepository } from '@/models/index.js';
+import { ClipEntityService } from '@/core/entities/ClipEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['clips', 'account'],
@@ -10,12 +11,6 @@ export const meta = {
 	requireCredential: false,
 
 	kind: 'read:account',
-
-	params: {
-		clipId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchClip: {
@@ -32,20 +27,38 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		clipId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['clipId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	// Fetch the clip
-	const clip = await Clips.findOne({
-		id: ps.clipId,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.clipsRepository)
+		private clipsRepository: ClipsRepository,
 
-	if (clip == null) {
-		throw new ApiError(meta.errors.noSuchClip);
+		private clipEntityService: ClipEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Fetch the clip
+			const clip = await this.clipsRepository.findOneBy({
+				id: ps.clipId,
+			});
+
+			if (clip == null) {
+				throw new ApiError(meta.errors.noSuchClip);
+			}
+
+			if (!clip.isPublic && (me == null || (clip.userId !== me.id))) {
+				throw new ApiError(meta.errors.noSuchClip);
+			}
+
+			return await this.clipEntityService.pack(clip);
+		});
 	}
-
-	if (!clip.isPublic && (me == null || (clip.userId !== me.id))) {
-		throw new ApiError(meta.errors.noSuchClip);
-	}
-
-	return await Clips.pack(clip);
-});
+}

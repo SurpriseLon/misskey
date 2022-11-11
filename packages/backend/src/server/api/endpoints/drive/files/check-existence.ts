@@ -1,6 +1,7 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { DriveFiles } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { DriveFilesRepository } from '@/models/index.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['drive'],
@@ -9,11 +10,7 @@ export const meta = {
 
 	kind: 'read:drive',
 
-	params: {
-		md5: {
-			validator: $.str,
-		},
-	},
+	description: 'Check if a given file exists.',
 
 	res: {
 		type: 'boolean',
@@ -21,12 +18,28 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const file = await DriveFiles.findOne({
-		md5: ps.md5,
-		userId: user.id,
-	});
+export const paramDef = {
+	type: 'object',
+	properties: {
+		md5: { type: 'string' },
+	},
+	required: ['md5'],
+} as const;
 
-	return file != null;
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const file = await this.driveFilesRepository.findOneBy({
+				md5: ps.md5,
+				userId: me.id,
+			});
+
+			return file != null;
+		});
+	}
+}

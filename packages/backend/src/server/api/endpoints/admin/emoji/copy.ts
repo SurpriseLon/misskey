@@ -1,25 +1,20 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { Emojis } from '@/models/index';
-import { genId } from '@/misc/gen-id';
-import { getConnection } from 'typeorm';
-import { ApiError } from '../../../error';
-import { DriveFile } from '@/models/entities/drive-file';
-import { ID } from '@/misc/cafy-id';
-import { uploadFromUrl } from '@/services/drive/upload-from-url';
-import { publishBroadcastStream } from '@/services/stream';
+import { Inject, Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { EmojisRepository } from '@/models/index.js';
+import { IdService } from '@/core/IdService.js';
+import type { DriveFile } from '@/models/entities/DriveFile.js';
+import { DI } from '@/di-symbols.js';
+import { DriveService } from '@/core/DriveService.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { EmojiEntityService } from '@/core/entities/EmojiEntityService.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['admin'],
 
 	requireCredential: true,
 	requireModerator: true,
-
-	params: {
-		emojiId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchEmoji: {
@@ -42,41 +37,67 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		emojiId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['emojiId'],
+} as const;
+
+// TODO: ロジックをサービスに切り出す
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const emoji = await Emojis.findOne(ps.emojiId);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.db)
+		private db: DataSource,
 
-	if (emoji == null) {
-		throw new ApiError(meta.errors.noSuchEmoji);
+		@Inject(DI.emojisRepository)
+		private emojisRepository: EmojisRepository,
+
+		private emojiEntityService: EmojiEntityService,
+		private idService: IdService,
+		private globalEventService: GlobalEventService,
+		private driveService: DriveService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const emoji = await this.emojisRepository.findOneBy({ id: ps.emojiId });
+
+			if (emoji == null) {
+				throw new ApiError(meta.errors.noSuchEmoji);
+			}
+
+			let driveFile: DriveFile;
+
+			try {
+				// Create file
+				driveFile = await this.driveService.uploadFromUrl({ url: emoji.originalUrl, user: null, force: true });
+			} catch (e) {
+				throw new ApiError();
+			}
+
+			const copied = await this.emojisRepository.insert({
+				id: this.idService.genId(),
+				updatedAt: new Date(),
+				name: emoji.name,
+				host: null,
+				aliases: [],
+				originalUrl: driveFile.url,
+				publicUrl: driveFile.webpublicUrl ?? driveFile.url,
+				type: driveFile.webpublicType ?? driveFile.type,
+			}).then(x => this.emojisRepository.findOneByOrFail(x.identifiers[0]));
+
+			await this.db.queryResultCache!.remove(['meta_emojis']);
+
+			this.globalEventService.publishBroadcastStream('emojiAdded', {
+				emoji: await this.emojiEntityService.pack(copied.id),
+			});
+
+			return {
+				id: copied.id,
+			};
+		});
 	}
-
-	let driveFile: DriveFile;
-
-	try {
-		// Create file
-		driveFile = await uploadFromUrl({ url: emoji.originalUrl, user: null, force: true });
-	} catch (e) {
-		throw new ApiError();
-	}
-
-	const copied = await Emojis.insert({
-		id: genId(),
-		updatedAt: new Date(),
-		name: emoji.name,
-		host: null,
-		aliases: [],
-		originalUrl: driveFile.url,
-		publicUrl: driveFile.webpublicUrl ?? driveFile.url,
-		type: driveFile.webpublicType ?? driveFile.type,
-	}).then(x => Emojis.findOneOrFail(x.identifiers[0]));
-
-	await getConnection().queryResultCache!.remove(['meta_emojis']);
-
-	publishBroadcastStream('emojiAdded', {
-		emoji: await Emojis.pack(copied.id),
-	});
-
-	return {
-		id: copied.id,
-	};
-});
+}

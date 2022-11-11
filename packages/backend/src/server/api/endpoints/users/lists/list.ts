@@ -1,5 +1,8 @@
-import define from '../../../define';
-import { UserLists } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UserListsRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { UserListEntityService } from '@/core/entities/UserListEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['lists', 'account'],
@@ -7,6 +10,8 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'read:account',
+
+	description: 'Show all lists that the authenticated user has created.',
 
 	res: {
 		type: 'array',
@@ -19,11 +24,27 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const userLists = await UserLists.find({
-		userId: me.id,
-	});
+export const paramDef = {
+	type: 'object',
+	properties: {},
+	required: [],
+} as const;
 
-	return await Promise.all(userLists.map(x => UserLists.pack(x)));
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.userListsRepository)
+		private userListsRepository: UserListsRepository,
+
+		private userListEntityService: UserListEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const userLists = await this.userListsRepository.findBy({
+				userId: me.id,
+			});
+
+			return await Promise.all(userLists.map(x => this.userListEntityService.pack(x)));
+		});
+	}
+}

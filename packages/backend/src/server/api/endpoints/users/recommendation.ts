@@ -1,9 +1,10 @@
 import ms from 'ms';
-import $ from 'cafy';
-import define from '../../define';
-import { Users, Followings } from '@/models/index';
-import { generateMutedUserQueryForUsers } from '../../common/generate-muted-user-query';
-import { generateBlockedUserQuery, generateBlockQueryForUsers } from '../../common/generate-block-query';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UsersRepository, FollowingsRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { QueryService } from '@/core/QueryService.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['users'],
@@ -12,17 +13,7 @@ export const meta = {
 
 	kind: 'read:account',
 
-	params: {
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-
-		offset: {
-			validator: $.optional.num.min(0),
-			default: 0,
-		},
-	},
+	description: 'Show users that the authenticated user might be interested to follow.',
 
 	res: {
 		type: 'array',
@@ -35,30 +26,53 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		offset: { type: 'integer', default: 0 },
+	},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const query = Users.createQueryBuilder('user')
-		.where('user.isLocked = FALSE')
-		.andWhere('user.isExplorable = TRUE')
-		.andWhere('user.host IS NULL')
-		.andWhere('user.updatedAt >= :date', { date: new Date(Date.now() - ms('7days')) })
-		.andWhere('user.id != :meId', { meId: me.id })
-		.orderBy('user.followersCount', 'DESC');
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	generateMutedUserQueryForUsers(query, me);
-	generateBlockQueryForUsers(query, me);
-	generateBlockedUserQuery(query, me);
+		@Inject(DI.followingsRepository)
+		private followingsRepository: FollowingsRepository,
+		
+		private userEntityService: UserEntityService,
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = this.usersRepository.createQueryBuilder('user')
+				.where('user.isLocked = FALSE')
+				.andWhere('user.isExplorable = TRUE')
+				.andWhere('user.host IS NULL')
+				.andWhere('user.updatedAt >= :date', { date: new Date(Date.now() - ms('7days')) })
+				.andWhere('user.id != :meId', { meId: me.id })
+				.orderBy('user.followersCount', 'DESC');
 
-	const followingQuery = Followings.createQueryBuilder('following')
-		.select('following.followeeId')
-		.where('following.followerId = :followerId', { followerId: me.id });
+			this.queryService.generateMutedUserQueryForUsers(query, me);
+			this.queryService.generateBlockQueryForUsers(query, me);
+			this.queryService.generateBlockedUserQuery(query, me);
 
-	query
-		.andWhere(`user.id NOT IN (${ followingQuery.getQuery() })`);
+			const followingQuery = this.followingsRepository.createQueryBuilder('following')
+				.select('following.followeeId')
+				.where('following.followerId = :followerId', { followerId: me.id });
 
-	query.setParameters(followingQuery.getParameters());
+			query
+				.andWhere(`user.id NOT IN (${ followingQuery.getQuery() })`);
 
-	const users = await query.take(ps.limit!).skip(ps.offset).getMany();
+			query.setParameters(followingQuery.getParameters());
 
-	return await Users.packMany(users, me, { detail: true });
-});
+			const users = await query.take(ps.limit).skip(ps.offset).getMany();
+
+			return await this.userEntityService.packMany(users, me, { detail: true });
+		});
+	}
+}

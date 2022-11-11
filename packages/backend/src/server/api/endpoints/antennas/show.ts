@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Antennas } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { AntennasRepository } from '@/models/index.js';
+import { AntennaEntityService } from '@/core/entities/AntennaEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['antennas', 'account'],
@@ -10,12 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'read:account',
-
-	params: {
-		antennaId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchAntenna: {
@@ -32,17 +27,35 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		antennaId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['antennaId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	// Fetch the antenna
-	const antenna = await Antennas.findOne({
-		id: ps.antennaId,
-		userId: me.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.antennasRepository)
+		private antennasRepository: AntennasRepository,
 
-	if (antenna == null) {
-		throw new ApiError(meta.errors.noSuchAntenna);
+		private antennaEntityService: AntennaEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Fetch the antenna
+			const antenna = await this.antennasRepository.findOneBy({
+				id: ps.antennaId,
+				userId: me.id,
+			});
+
+			if (antenna == null) {
+				throw new ApiError(meta.errors.noSuchAntenna);
+			}
+
+			return await this.antennaEntityService.pack(antenna);
+		});
 	}
-
-	return await Antennas.pack(antenna);
-});
+}

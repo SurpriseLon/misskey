@@ -52,6 +52,17 @@ export function unique<T>(xs: T[]): T[] {
 	return [...new Set(xs)];
 }
 
+export function uniqueBy<TValue, TKey>(values: TValue[], keySelector: (value: TValue) => TKey): TValue[] {
+	const map = new Map<TKey, TValue>();
+
+	for (const value of values) {
+		const key = keySelector(value);
+		if (!map.has(key)) map.set(key, value);
+	}
+
+	return [...map.values()];
+}
+
 export function sum(xs: number[]): number {
 	return xs.reduce((a, b) => a + b, 0);
 }
@@ -87,7 +98,7 @@ export function groupOn<T, S>(f: (x: T) => S, xs: T[]): T[][] {
 export function groupByX<T>(collections: T[], keySelector: (x: T) => string) {
 	return collections.reduce((obj: Record<string, T[]>, item: T) => {
 		const key = keySelector(item);
-		if (!obj.hasOwnProperty(key)) {
+		if (typeof obj[key] === 'undefined') {
 			obj[key] = [];
 		}
 

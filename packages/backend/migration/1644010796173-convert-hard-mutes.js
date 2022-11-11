@@ -1,14 +1,15 @@
-const RE2 = require('re2');
-const { MigrationInterface, QueryRunner } = require("typeorm");
+import RE2 from 're2';
 
-module.exports = class convertHardMutes1644010796173 {
+
+export class convertHardMutes1644010796173 {
     name = 'convertHardMutes1644010796173'
 
     async up(queryRunner) {
-        let entries = await queryRunner.query(`SELECT "userId", "mutedWords" FROM "user_profile"`);
+        let entries = await queryRunner.query(`SELECT "userId", "mutedWords" FROM "user_profile" WHERE "userHost" IS NULL`);
         for(let i = 0; i < entries.length; i++) {
             let words = entries[i].mutedWords
                 .map(line => {
+										if (typeof line === 'string') return [];
                     const regexp = line.join(" ").match(/^\/(.+)\/(.*)$/);
                     if (regexp) {
                         // convert regexp's

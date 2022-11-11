@@ -1,10 +1,11 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import { publishUserListStream } from '@/services/stream';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { getUser } from '../../../common/getters';
-import { UserLists, UserListJoinings, Users } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UserListsRepository, UserListJoiningsRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
+import { GetterService } from '@/server/api/GetterService.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['lists', 'users'],
@@ -13,15 +14,7 @@ export const meta = {
 
 	kind: 'write:account',
 
-	params: {
-		listId: {
-			validator: $.type(ID),
-		},
-
-		userId: {
-			validator: $.type(ID),
-		},
-	},
+	description: 'Remove a user from a list.',
 
 	errors: {
 		noSuchList: {
@@ -38,26 +31,50 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		listId: { type: 'string', format: 'misskey:id' },
+		userId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['listId', 'userId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	// Fetch the list
-	const userList = await UserLists.findOne({
-		id: ps.listId,
-		userId: me.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.userListsRepository)
+		private userListsRepository: UserListsRepository,
 
-	if (userList == null) {
-		throw new ApiError(meta.errors.noSuchList);
+		@Inject(DI.userListJoiningsRepository)
+		private userListJoiningsRepository: UserListJoiningsRepository,
+
+		private userEntityService: UserEntityService,
+		private getterService: GetterService,
+		private globalEventService: GlobalEventService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Fetch the list
+			const userList = await this.userListsRepository.findOneBy({
+				id: ps.listId,
+				userId: me.id,
+			});
+
+			if (userList == null) {
+				throw new ApiError(meta.errors.noSuchList);
+			}
+
+			// Fetch the user
+			const user = await this.getterService.getUser(ps.userId).catch(err => {
+				if (err.id === '15348ddd-432d-49c2-8a5a-8069753becff') throw new ApiError(meta.errors.noSuchUser);
+				throw err;
+			});
+
+			// Pull the user
+			await this.userListJoiningsRepository.delete({ userListId: userList.id, userId: user.id });
+
+			this.globalEventService.publishUserListStream(userList.id, 'userRemoved', await this.userEntityService.pack(user));
+		});
 	}
-
-	// Fetch the user
-	const user = await getUser(ps.userId).catch(e => {
-		if (e.id === '15348ddd-432d-49c2-8a5a-8069753becff') throw new ApiError(meta.errors.noSuchUser);
-		throw e;
-	});
-
-	// Pull the user
-	await UserListJoinings.delete({ userListId: userList.id, userId: user.id });
-
-	publishUserListStream(userList.id, 'userRemoved', await Users.pack(user));
-});
+}

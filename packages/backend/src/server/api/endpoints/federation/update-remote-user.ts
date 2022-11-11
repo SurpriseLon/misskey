@@ -1,23 +1,32 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { getRemoteUser } from '../../common/getters';
-import { updatePerson } from '@/remote/activitypub/models/person';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { ApPersonService } from '@/core/remote/activitypub/models/ApPersonService.js';
+import { GetterService } from '@/server/api/GetterService.js';
 
 export const meta = {
 	tags: ['federation'],
 
 	requireCredential: true,
+} as const;
 
-	params: {
-		userId: {
-			validator: $.type(ID),
-		},
+export const paramDef = {
+	type: 'object',
+	properties: {
+		userId: { type: 'string', format: 'misskey:id' },
 	},
+	required: ['userId'],
 } as const;
 
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps) => {
-	const user = await getRemoteUser(ps.userId);
-	await updatePerson(user.uri!);
-});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		private getterService: GetterService,
+		private apPersonService: ApPersonService,
+	) {
+		super(meta, paramDef, async (ps) => {
+			const user = await this.getterService.getRemoteUser(ps.userId);
+			await this.apPersonService.updatePerson(user.uri!);
+		});
+	}
+}

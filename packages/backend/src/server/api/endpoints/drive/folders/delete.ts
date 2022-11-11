@@ -1,9 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { publishDriveStream } from '@/services/stream';
-import { ApiError } from '../../../error';
-import { DriveFolders, DriveFiles } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { DriveFoldersRepository, DriveFilesRepository } from '@/models/index.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['drive'],
@@ -11,12 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:drive',
-
-	params: {
-		folderId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchFolder: {
@@ -33,29 +27,50 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		folderId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['folderId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	// Get folder
-	const folder = await DriveFolders.findOne({
-		id: ps.folderId,
-		userId: user.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
 
-	if (folder == null) {
-		throw new ApiError(meta.errors.noSuchFolder);
+		@Inject(DI.driveFoldersRepository)
+		private driveFoldersRepository: DriveFoldersRepository,
+
+		private globalEventService: GlobalEventService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Get folder
+			const folder = await this.driveFoldersRepository.findOneBy({
+				id: ps.folderId,
+				userId: me.id,
+			});
+
+			if (folder == null) {
+				throw new ApiError(meta.errors.noSuchFolder);
+			}
+
+			const [childFoldersCount, childFilesCount] = await Promise.all([
+				this.driveFoldersRepository.countBy({ parentId: folder.id }),
+				this.driveFilesRepository.countBy({ folderId: folder.id }),
+			]);
+
+			if (childFoldersCount !== 0 || childFilesCount !== 0) {
+				throw new ApiError(meta.errors.hasChildFilesOrFolders);
+			}
+
+			await this.driveFoldersRepository.delete(folder.id);
+
+			// Publish folderCreated event
+			this.globalEventService.publishDriveStream(me.id, 'folderDeleted', folder.id);
+		});
 	}
-
-	const [childFoldersCount, childFilesCount] = await Promise.all([
-		DriveFolders.count({ parentId: folder.id }),
-		DriveFiles.count({ folderId: folder.id }),
-	]);
-
-	if (childFoldersCount !== 0 || childFilesCount !== 0) {
-		throw new ApiError(meta.errors.hasChildFilesOrFolders);
-	}
-
-	await DriveFolders.delete(folder.id);
-
-	// Publish folderCreated event
-	publishDriveStream(user.id, 'folderDeleted', folder.id);
-});
+}

@@ -1,57 +1,15 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { AbuseUserReports } from '@/models/index';
-import { makePaginationQuery } from '../../common/make-pagination-query';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { AbuseUserReportsRepository } from '@/models/index.js';
+import { QueryService } from '@/core/QueryService.js';
+import { DI } from '@/di-symbols.js';
+import { AbuseUserReportEntityService } from '@/core/entities/AbuseUserReportEntityService.js';
 
 export const meta = {
 	tags: ['admin'],
 
 	requireCredential: true,
 	requireModerator: true,
-
-	params: {
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-
-		state: {
-			validator: $.optional.nullable.str,
-			default: null,
-		},
-
-		reporterOrigin: {
-			validator: $.optional.str.or([
-				'combined',
-				'local',
-				'remote',
-			]),
-			default: 'combined',
-		},
-
-		targetUserOrigin: {
-			validator: $.optional.str.or([
-				'combined',
-				'local',
-				'remote',
-			]),
-			default: 'combined',
-		},
-
-		forwarded: {
-			validator: $.optional.bool,
-			default: false,
-		},
-	},
 
 	res: {
 		type: 'array',
@@ -115,26 +73,51 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+		state: { type: 'string', nullable: true, default: null },
+		reporterOrigin: { type: 'string', enum: ['combined', 'local', 'remote'], default: 'combined' },
+		targetUserOrigin: { type: 'string', enum: ['combined', 'local', 'remote'], default: 'combined' },
+		forwarded: { type: 'boolean', default: false },
+	},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps) => {
-	const query = makePaginationQuery(AbuseUserReports.createQueryBuilder('report'), ps.sinceId, ps.untilId);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.abuseUserReportsRepository)
+		private abuseUserReportsRepository: AbuseUserReportsRepository,
 
-	switch (ps.state) {
-		case 'resolved': query.andWhere('report.resolved = TRUE'); break;
-		case 'unresolved': query.andWhere('report.resolved = FALSE'); break;
+		private abuseUserReportEntityService: AbuseUserReportEntityService,
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = this.queryService.makePaginationQuery(this.abuseUserReportsRepository.createQueryBuilder('report'), ps.sinceId, ps.untilId);
+
+			switch (ps.state) {
+				case 'resolved': query.andWhere('report.resolved = TRUE'); break;
+				case 'unresolved': query.andWhere('report.resolved = FALSE'); break;
+			}
+
+			switch (ps.reporterOrigin) {
+				case 'local': query.andWhere('report.reporterHost IS NULL'); break;
+				case 'remote': query.andWhere('report.reporterHost IS NOT NULL'); break;
+			}
+
+			switch (ps.targetUserOrigin) {
+				case 'local': query.andWhere('report.targetUserHost IS NULL'); break;
+				case 'remote': query.andWhere('report.targetUserHost IS NOT NULL'); break;
+			}
+
+			const reports = await query.take(ps.limit).getMany();
+
+			return await this.abuseUserReportEntityService.packMany(reports);
+		});
 	}
-
-	switch (ps.reporterOrigin) {
-		case 'local': query.andWhere('report.reporterHost IS NULL'); break;
-		case 'remote': query.andWhere('report.reporterHost IS NOT NULL'); break;
-	}
-
-	switch (ps.targetUserOrigin) {
-		case 'local': query.andWhere('report.targetUserHost IS NULL'); break;
-		case 'remote': query.andWhere('report.targetUserHost IS NOT NULL'); break;
-	}
-
-	const reports = await query.take(ps.limit!).getMany();
-
-	return await AbuseUserReports.packMany(reports);
-});
+}

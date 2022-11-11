@@ -1,42 +1,17 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { NoteReactions, UserProfiles } from '@/models/index';
-import { makePaginationQuery } from '../../common/make-pagination-query';
-import { generateVisibilityQuery } from '../../common/generate-visibility-query';
-import { ApiError } from '../../error';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UserProfilesRepository, NoteReactionsRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { QueryService } from '@/core/QueryService.js';
+import { NoteReactionEntityService } from '@/core/entities/NoteReactionEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['users', 'reactions'],
 
 	requireCredential: false,
 
-	params: {
-		userId: {
-			validator: $.type(ID),
-		},
-
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-
-		sinceDate: {
-			validator: $.optional.num,
-		},
-
-		untilDate: {
-			validator: $.optional.num,
-		},
-	},
+	description: 'Show all reactions this user made.',
 
 	res: {
 		type: 'array',
@@ -57,24 +32,51 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		userId: { type: 'string', format: 'misskey:id' },
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+		sinceDate: { type: 'integer' },
+		untilDate: { type: 'integer' },
+	},
+	required: ['userId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const profile = await UserProfiles.findOneOrFail(ps.userId);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.userProfilesRepository)
+		private userProfilesRepository: UserProfilesRepository,
 
-	if (me == null || (me.id !== ps.userId && !profile.publicReactions)) {
-		throw new ApiError(meta.errors.reactionsNotPublic);
+		@Inject(DI.noteReactionsRepository)
+		private noteReactionsRepository: NoteReactionsRepository,
+
+		private noteReactionEntityService: NoteReactionEntityService,
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const profile = await this.userProfilesRepository.findOneByOrFail({ userId: ps.userId });
+
+			if (me == null || (me.id !== ps.userId && !profile.publicReactions)) {
+				throw new ApiError(meta.errors.reactionsNotPublic);
+			}
+
+			const query = this.queryService.makePaginationQuery(this.noteReactionsRepository.createQueryBuilder('reaction'),
+				ps.sinceId, ps.untilId, ps.sinceDate, ps.untilDate)
+				.andWhere('reaction.userId = :userId', { userId: ps.userId })
+				.leftJoinAndSelect('reaction.note', 'note');
+
+			this.queryService.generateVisibilityQuery(query, me);
+
+			const reactions = await query
+				.take(ps.limit)
+				.getMany();
+
+			return await Promise.all(reactions.map(reaction => this.noteReactionEntityService.pack(reaction, me, { withNote: true })));
+		});
 	}
-
-	const query = makePaginationQuery(NoteReactions.createQueryBuilder('reaction'),
-			ps.sinceId, ps.untilId, ps.sinceDate, ps.untilDate)
-		.andWhere(`reaction.userId = :userId`, { userId: ps.userId })
-		.leftJoinAndSelect('reaction.note', 'note');
-
-	generateVisibilityQuery(query, me);
-
-	const reactions = await query
-		.take(ps.limit!)
-		.getMany();
-
-	return await Promise.all(reactions.map(reaction => NoteReactions.pack(reaction, me, { withNote: true })));
-});
+}

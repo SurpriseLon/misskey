@@ -1,18 +1,15 @@
-import $ from 'cafy';
-import define from '../../define';
-import { ID } from '@/misc/cafy-id';
-import { Users } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UsersRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['users'],
 
 	requireCredential: true,
 
-	params: {
-		userId: {
-			validator: $.either($.type(ID), $.arr($.type(ID)).unique()),
-		},
-	},
+	description: 'Show the different kinds of relations between the authenticated user and the specified user(s).',
 
 	res: {
 		optional: false, nullable: false,
@@ -101,11 +98,37 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		userId: {
+			anyOf: [
+				{ type: 'string', format: 'misskey:id' },
+				{
+					type: 'array',
+					items: { type: 'string', format: 'misskey:id' },
+				},
+			],
+		},
+	},
+	required: ['userId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const ids = Array.isArray(ps.userId) ? ps.userId : [ps.userId];
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	const relations = await Promise.all(ids.map(id => Users.getRelation(me.id, id)));
+		private userEntityService: UserEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const ids = Array.isArray(ps.userId) ? ps.userId : [ps.userId];
 
-	return Array.isArray(ps.userId) ? relations : relations[0];
-});
+			const relations = await Promise.all(ids.map(id => this.userEntityService.getRelation(me.id, id)));
+
+			return Array.isArray(ps.userId) ? relations : relations[0];
+		});
+	}
+}

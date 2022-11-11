@@ -1,34 +1,49 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { Users } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { UsersRepository } from '@/models/index.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['admin'],
 
 	requireCredential: true,
 	requireAdmin: true,
+} as const;
 
-	params: {
-		userId: {
-			validator: $.type(ID),
-		},
+export const paramDef = {
+	type: 'object',
+	properties: {
+		userId: { type: 'string', format: 'misskey:id' },
 	},
+	required: ['userId'],
 } as const;
 
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps) => {
-	const user = await Users.findOne(ps.userId as string);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	if (user == null) {
-		throw new Error('user not found');
+		private globalEventService: GlobalEventService,
+	) {
+		super(meta, paramDef, async (ps) => {
+			const user = await this.usersRepository.findOneBy({ id: ps.userId });
+
+			if (user == null) {
+				throw new Error('user not found');
+			}
+
+			if (user.isAdmin) {
+				throw new Error('cannot mark as moderator if admin user');
+			}
+
+			await this.usersRepository.update(user.id, {
+				isModerator: true,
+			});
+
+			this.globalEventService.publishInternalEvent('userChangeModeratorState', { id: user.id, isModerator: true });
+		});
 	}
-
-	if (user.isAdmin) {
-		throw new Error('cannot mark as moderator if admin user');
-	}
-
-	await Users.update(user.id, {
-		isModerator: true,
-	});
-});
+}

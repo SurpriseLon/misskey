@@ -1,5 +1,6 @@
 <template>
-<component :is="popup.component"
+<component
+	:is="popup.component"
 	v-for="popup in popups"
 	:key="popup.id"
 	v-bind="popup.props"
@@ -11,53 +12,67 @@
 <XStreamIndicator/>
 
 <div v-if="pendingApiRequestsCount > 0" id="wait"></div>
+
+<div v-if="dev" id="devTicker"><span>DEV BUILD</span></div>
 </template>
 
-<script lang="ts">
-import { defineAsyncComponent, defineComponent } from 'vue';
-import { popup, popups, uploads, pendingApiRequestsCount } from '@/os';
+<script lang="ts" setup>
+import { defineAsyncComponent } from 'vue';
+import { swInject } from './sw-inject';
+import { popup, popups, pendingApiRequestsCount } from '@/os';
+import { uploads } from '@/scripts/upload';
 import * as sound from '@/scripts/sound';
 import { $i } from '@/account';
 import { stream } from '@/stream';
 
-export default defineComponent({
-	components: {
-		XStreamIndicator: defineAsyncComponent(() => import('./stream-indicator.vue')),
-		XUpload: defineAsyncComponent(() => import('./upload.vue')),
-	},
+const XStreamIndicator = defineAsyncComponent(() => import('./stream-indicator.vue'));
+const XUpload = defineAsyncComponent(() => import('./upload.vue'));
 
-	setup() {
-		const onNotification = notification => {
-			if ($i.mutingNotificationTypes.includes(notification.type)) return;
+const dev = _DEV_;
 
-			if (document.visibilityState === 'visible') {
-				stream.send('readNotification', {
-					id: notification.id
-				});
+const onNotification = notification => {
+	if ($i.mutingNotificationTypes.includes(notification.type)) return;
 
-				popup(import('@/components/notification-toast.vue'), {
-					notification
-				}, {}, 'closed');
-			}
+	if (document.visibilityState === 'visible') {
+		stream.send('readNotification', {
+			id: notification.id,
+		});
 
-			sound.play('notification');
-		};
+		popup(defineAsyncComponent(() => import('@/components/MkNotificationToast.vue')), {
+			notification,
+		}, {}, 'closed');
+	}
 
-		if ($i) {
-			const connection = stream.useChannel('main', null, 'UI');
-			connection.on('notification', onNotification);
-		}
+	sound.play('notification');
+};
 
-		return {
-			uploads,
-			popups,
-			pendingApiRequestsCount,
-		};
-	},
-});
+if ($i) {
+	const connection = stream.useChannel('main', null, 'UI');
+	connection.on('notification', onNotification);
+
+	//#region Listen message from SW
+	if ('serviceWorker' in navigator) {
+		swInject();
+	}
+}
 </script>
 
 <style lang="scss">
+@keyframes dev-ticker-blink {
+	0% { opacity: 1; }
+	50% { opacity: 0; }
+	100% { opacity: 1; }
+}
+
+@keyframes progress-spinner {
+	0% {
+		transform: rotate(0deg);
+	}
+	100% {
+		transform: rotate(360deg);
+	}
+}
+
 #wait {
 	display: block;
 	position: fixed;
@@ -79,12 +94,20 @@ export default defineComponent({
 	}
 }
 
-@keyframes progress-spinner {
-	0% {
-		transform: rotate(0deg);
-	}
-	100% {
-		transform: rotate(360deg);
+#devTicker {
+	position: fixed;
+	top: 0;
+	left: 0;
+	z-index: 2147483647;
+	color: #ff0;
+	background: rgba(0, 0, 0, 0.5);
+	padding: 4px 5px;
+	font-size: 14px;
+	pointer-events: none;
+	user-select: none;
+
+	> span {
+		animation: dev-ticker-blink 2s infinite;
 	}
 }
 </style>

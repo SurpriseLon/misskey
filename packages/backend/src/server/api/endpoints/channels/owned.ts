@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { Channels } from '@/models/index';
-import { makePaginationQuery } from '../../common/make-pagination-query';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { ChannelsRepository } from '@/models/index.js';
+import { QueryService } from '@/core/QueryService.js';
+import { ChannelEntityService } from '@/core/entities/ChannelEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['channels', 'account'],
@@ -10,21 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'read:channels',
-
-	params: {
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 5,
-		},
-	},
 
 	res: {
 		type: 'array',
@@ -37,14 +23,35 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 5 },
+	},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const query = makePaginationQuery(Channels.createQueryBuilder(), ps.sinceId, ps.untilId)
-		.andWhere({ userId: me.id });
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.channelsRepository)
+		private channelsRepository: ChannelsRepository,
 
-	const channels = await query
-		.take(ps.limit!)
-		.getMany();
+		private channelEntityService: ChannelEntityService,
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = this.queryService.makePaginationQuery(this.channelsRepository.createQueryBuilder(), ps.sinceId, ps.untilId)
+				.andWhere({ userId: me.id });
 
-	return await Promise.all(channels.map(x => Channels.pack(x, me)));
-});
+			const channels = await query
+				.take(ps.limit)
+				.getMany();
+
+			return await Promise.all(channels.map(x => this.channelEntityService.pack(x, me)));
+		});
+	}
+}

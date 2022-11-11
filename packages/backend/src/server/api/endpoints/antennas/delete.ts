@@ -1,9 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Antennas } from '@/models/index';
-import { publishInternalEvent } from '@/services/stream';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { AntennasRepository } from '@/models/index.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['antennas'],
@@ -11,12 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:account',
-
-	params: {
-		antennaId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchAntenna: {
@@ -27,18 +21,36 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		antennaId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['antennaId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const antenna = await Antennas.findOne({
-		id: ps.antennaId,
-		userId: user.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.antennasRepository)
+		private antennasRepository: AntennasRepository,
 
-	if (antenna == null) {
-		throw new ApiError(meta.errors.noSuchAntenna);
+		private globalEventService: GlobalEventService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const antenna = await this.antennasRepository.findOneBy({
+				id: ps.antennaId,
+				userId: me.id,
+			});
+
+			if (antenna == null) {
+				throw new ApiError(meta.errors.noSuchAntenna);
+			}
+
+			await this.antennasRepository.delete(antenna.id);
+
+			this.globalEventService.publishInternalEvent('antennaDeleted', antenna);
+		});
 	}
-
-	await Antennas.delete(antenna.id);
-
-	publishInternalEvent('antennaDeleted', antenna);
-});
+}

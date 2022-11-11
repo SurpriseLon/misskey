@@ -1,70 +1,57 @@
 <template>
 <form class="mk-setup" @submit.prevent="submit()">
 	<h1>Welcome to Misskey!</h1>
-	<div>
+	<div class="_formRoot">
 		<p>{{ $ts.intro }}</p>
-		<MkInput v-model="username" pattern="^[a-zA-Z0-9_]{1,20}$" spellcheck="false" required data-cy-admin-username>
+		<MkInput v-model="username" pattern="^[a-zA-Z0-9_]{1,20}$" :spellcheck="false" required data-cy-admin-username class="_formBlock">
 			<template #label>{{ $ts.username }}</template>
 			<template #prefix>@</template>
 			<template #suffix>@{{ host }}</template>
 		</MkInput>
-		<MkInput v-model="password" type="password" data-cy-admin-password>
+		<MkInput v-model="password" type="password" data-cy-admin-password class="_formBlock">
 			<template #label>{{ $ts.password }}</template>
 			<template #prefix><i class="fas fa-lock"></i></template>
 		</MkInput>
-		<footer>
-			<MkButton primary type="submit" :disabled="submitting" data-cy-admin-ok>
+		<div class="bottom _formBlock">
+			<MkButton gradate type="submit" :disabled="submitting" data-cy-admin-ok>
 				{{ submitting ? $ts.processing : $ts.done }}<MkEllipsis v-if="submitting"/>
 			</MkButton>
-		</footer>
+		</div>
 	</div>
 </form>
 </template>
 
-<script lang="ts">
-import { defineComponent } from 'vue';
-import MkButton from '@/components/ui/button.vue';
+<script lang="ts" setup>
+import { } from 'vue';
+import MkButton from '@/components/MkButton.vue';
 import MkInput from '@/components/form/input.vue';
 import { host } from '@/config';
 import * as os from '@/os';
 import { login } from '@/account';
+import { i18n } from '@/i18n';
 
-export default defineComponent({
-	components: {
-		MkButton,
-		MkInput,
-	},
+let username = $ref('');
+let password = $ref('');
+let submitting = $ref(false);
 
-	data() {
-		return {
-			username: '',
-			password: '',
-			submitting: false,
-			host,
-		}
-	},
+function submit() {
+	if (submitting) return;
+	submitting = true;
 
-	methods: {
-		submit() {
-			if (this.submitting) return;
-			this.submitting = true;
+	os.api('admin/accounts/create', {
+		username: username,
+		password: password,
+	}).then(res => {
+		return login(res.token);
+	}).catch(() => {
+		submitting = false;
 
-			os.api('admin/accounts/create', {
-				username: this.username,
-				password: this.password,
-			}).then(res => {
-				return login(res.token);
-			}).catch(() => {
-				this.submitting = false;
-
-				os.alert({
-					type: 'error',
-					text: this.$ts.somethingHappened
-				});
-			});
-		}
-	}
-});
+		os.alert({
+			type: 'error',
+			text: i18n.ts.somethingHappened,
+		});
+	});
+}
 </script>
 
 <style lang="scss" scoped>
@@ -92,7 +79,7 @@ export default defineComponent({
 			margin-top: 0;
 		}
 
-		> footer {
+		> .bottom {
 			> * {
 				margin: 0 auto;
 			}

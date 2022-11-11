@@ -1,7 +1,9 @@
-import { DriveFile } from '@/models/entities/drive-file';
-import { User } from '@/models/entities/user';
-import { IActivity } from '@/remote/activitypub/type';
-import * as httpSignature from 'http-signature';
+import type { DriveFile } from '@/models/entities/DriveFile.js';
+import type { Note } from '@/models/entities/Note.js';
+import type { User } from '@/models/entities/User.js';
+import type { Webhook } from '@/models/entities/Webhook.js';
+import type { IActivity } from '@/core/remote/activitypub/type.js';
+import type httpSignature from '@peertube/http-signature';
 
 export type DeliverJobData = {
 	/** Actor */
@@ -39,6 +41,21 @@ export type ObjectStorageJobData = ObjectStorageFileJobData | Record<string, unk
 
 export type ObjectStorageFileJobData = {
 	key: string;
+};
+
+export type EndedPollNotificationJobData = {
+	noteId: Note['id'];
+};
+
+export type WebhookDeliverJobData = {
+	type: string;
+	content: unknown;
+	webhookId: Webhook['id'];
+	userId: User['id'];
+	to: string;
+	secret: string;
+	createdAt: number;
+	eventId: string;
 };
 
 export type ThinUser = {

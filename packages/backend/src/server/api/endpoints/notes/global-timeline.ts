@@ -1,46 +1,15 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { fetchMeta } from '@/misc/fetch-meta';
-import { ApiError } from '../../error';
-import { makePaginationQuery } from '../../common/make-pagination-query';
-import { Notes } from '@/models/index';
-import { generateMutedUserQuery } from '../../common/generate-muted-user-query';
-import { generateMutedInstanceQuery } from '../../common/generate-muted-instance-query';
-import { activeUsersChart } from '@/services/chart/index';
-import { generateRepliesQuery } from '../../common/generate-replies-query';
-import { generateMutedNoteQuery } from '../../common/generate-muted-note-query';
-import { generateBlockedUserQuery } from '../../common/generate-block-query';
+import { Inject, Injectable } from '@nestjs/common';
+import type { NotesRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { QueryService } from '@/core/QueryService.js';
+import { NoteEntityService } from '@/core/entities/NoteEntityService.js';
+import { MetaService } from '@/core/MetaService.js';
+import ActiveUsersChart from '@/core/chart/charts/active-users.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['notes'],
-
-	params: {
-		withFiles: {
-			validator: $.optional.bool,
-		},
-
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-
-		sinceDate: {
-			validator: $.optional.num,
-		},
-
-		untilDate: {
-			validator: $.optional.num,
-		},
-	},
 
 	res: {
 		type: 'array',
@@ -61,44 +30,81 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		withFiles: {
+			type: 'boolean',
+			default: false,
+			description: 'Only show notes that have attached files.',
+		},
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+		sinceDate: { type: 'integer' },
+		untilDate: { type: 'integer' },
+	},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const m = await fetchMeta();
-	if (m.disableGlobalTimeline) {
-		if (user == null || (!user.isAdmin && !user.isModerator)) {
-			throw new ApiError(meta.errors.gtlDisabled);
-		}
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.notesRepository)
+		private notesRepository: NotesRepository,
+
+		private noteEntityService: NoteEntityService,
+		private queryService: QueryService,
+		private metaService: MetaService,
+		private activeUsersChart: ActiveUsersChart,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const m = await this.metaService.fetch();
+			if (m.disableGlobalTimeline) {
+				if (me == null || (!me.isAdmin && !me.isModerator)) {
+					throw new ApiError(meta.errors.gtlDisabled);
+				}
+			}
+
+			//#region Construct query
+			const query = this.queryService.makePaginationQuery(this.notesRepository.createQueryBuilder('note'),
+				ps.sinceId, ps.untilId, ps.sinceDate, ps.untilDate)
+				.andWhere('note.visibility = \'public\'')
+				.andWhere('note.channelId IS NULL')
+				.innerJoinAndSelect('note.user', 'user')
+				.leftJoinAndSelect('user.avatar', 'avatar')
+				.leftJoinAndSelect('user.banner', 'banner')
+				.leftJoinAndSelect('note.reply', 'reply')
+				.leftJoinAndSelect('note.renote', 'renote')
+				.leftJoinAndSelect('reply.user', 'replyUser')
+				.leftJoinAndSelect('replyUser.avatar', 'replyUserAvatar')
+				.leftJoinAndSelect('replyUser.banner', 'replyUserBanner')
+				.leftJoinAndSelect('renote.user', 'renoteUser')
+				.leftJoinAndSelect('renoteUser.avatar', 'renoteUserAvatar')
+				.leftJoinAndSelect('renoteUser.banner', 'renoteUserBanner');
+
+			this.queryService.generateRepliesQuery(query, me);
+			if (me) {
+				this.queryService.generateMutedUserQuery(query, me);
+				this.queryService.generateMutedNoteQuery(query, me);
+				this.queryService.generateBlockedUserQuery(query, me);
+			}
+
+			if (ps.withFiles) {
+				query.andWhere('note.fileIds != \'{}\'');
+			}
+			//#endregion
+
+			const timeline = await query.take(ps.limit).getMany();
+
+			process.nextTick(() => {
+				if (me) {
+					this.activeUsersChart.read(me);
+				}
+			});
+
+			return await this.noteEntityService.packMany(timeline, me);
+		});
 	}
-
-	//#region Construct query
-	const query = makePaginationQuery(Notes.createQueryBuilder('note'),
-			ps.sinceId, ps.untilId, ps.sinceDate, ps.untilDate)
-		.andWhere('note.visibility = \'public\'')
-		.andWhere('note.channelId IS NULL')
-		.innerJoinAndSelect('note.user', 'user')
-		.leftJoinAndSelect('note.reply', 'reply')
-		.leftJoinAndSelect('note.renote', 'renote')
-		.leftJoinAndSelect('reply.user', 'replyUser')
-		.leftJoinAndSelect('renote.user', 'renoteUser');
-
-	generateRepliesQuery(query, user);
-	if (user) generateMutedUserQuery(query, user);
-	if (user) generateMutedNoteQuery(query, user);
-	if (user) generateBlockedUserQuery(query, user);
-	if (user) generateMutedInstanceQuery(query, user);
-
-	if (ps.withFiles) {
-		query.andWhere('note.fileIds != \'{}\'');
-	}
-	//#endregion
-
-	const timeline = await query.take(ps.limit!).getMany();
-
-	process.nextTick(() => {
-		if (user) {
-			activeUsersChart.read(user);
-		}
-	});
-
-	return await Notes.packMany(timeline, user);
-});
+}

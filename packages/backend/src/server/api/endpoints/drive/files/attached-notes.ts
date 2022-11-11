@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { DriveFiles, Notes } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { NotesRepository, DriveFilesRepository } from '@/models/index.js';
+import { NoteEntityService } from '@/core/entities/NoteEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['drive', 'notes'],
@@ -11,11 +12,7 @@ export const meta = {
 
 	kind: 'read:drive',
 
-	params: {
-		fileId: {
-			validator: $.type(ID),
-		},
-	},
+	description: 'Find the notes to which the given file is attached.',
 
 	res: {
 		type: 'array',
@@ -36,23 +33,44 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		fileId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['fileId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	// Fetch file
-	const file = await DriveFiles.findOne({
-		id: ps.fileId,
-		userId: user.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
 
-	if (file == null) {
-		throw new ApiError(meta.errors.noSuchFile);
+		@Inject(DI.notesRepository)
+		private notesRepository: NotesRepository,
+
+		private noteEntityService: NoteEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Fetch file
+			const file = await this.driveFilesRepository.findOneBy({
+				id: ps.fileId,
+				userId: me.id,
+			});
+
+			if (file == null) {
+				throw new ApiError(meta.errors.noSuchFile);
+			}
+
+			const notes = await this.notesRepository.createQueryBuilder('note')
+				.where(':file = ANY(note.fileIds)', { file: file.id })
+				.getMany();
+
+			return await this.noteEntityService.packMany(notes, me, {
+				detail: true,
+			});
+		});
 	}
-
-	const notes = await Notes.createQueryBuilder('note')
-		.where(':file = ANY(note.fileIds)', { file: file.id })
-		.getMany();
-
-	return await Notes.packMany(notes, user, {
-		detail: true,
-	});
-});
+}

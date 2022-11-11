@@ -1,11 +1,11 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { getNote } from '../../../common/getters';
-import { ApiError } from '../../../error';
-import { Notes, NoteThreadMutings } from '@/models';
-import { genId } from '@/misc/gen-id';
-import readNote from '@/services/note/read';
+import { Inject, Injectable } from '@nestjs/common';
+import type { NotesRepository, NoteThreadMutingsRepository } from '@/models/index.js';
+import { IdService } from '@/core/IdService.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { GetterService } from '@/server/api/GetterService.js';
+import { NoteReadService } from '@/core/NoteReadService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['notes'],
@@ -13,12 +13,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:account',
-
-	params: {
-		noteId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchNote: {
@@ -29,27 +23,50 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		noteId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['noteId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const note = await getNote(ps.noteId).catch(e => {
-		if (e.id === '9725d0ce-ba28-4dde-95a7-2cbb2c15de24') throw new ApiError(meta.errors.noSuchNote);
-		throw e;
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.notesRepository)
+		private notesRepository: NotesRepository,
 
-	const mutedNotes = await Notes.find({
-		where: [{
-			id: note.threadId || note.id,
-		}, {
-			threadId: note.threadId || note.id,
-		}],
-	});
+		@Inject(DI.noteThreadMutingsRepository)
+		private noteThreadMutingsRepository: NoteThreadMutingsRepository,
 
-	await readNote(user.id, mutedNotes);
+		private getterService: GetterService,
+		private noteReadService: NoteReadService,
+		private idService: IdService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const note = await this.getterService.getNote(ps.noteId).catch(err => {
+				if (err.id === '9725d0ce-ba28-4dde-95a7-2cbb2c15de24') throw new ApiError(meta.errors.noSuchNote);
+				throw err;
+			});
 
-	await NoteThreadMutings.insert({
-		id: genId(),
-		createdAt: new Date(),
-		threadId: note.threadId || note.id,
-		userId: user.id,
-	});
-});
+			const mutedNotes = await this.notesRepository.find({
+				where: [{
+					id: note.threadId ?? note.id,
+				}, {
+					threadId: note.threadId ?? note.id,
+				}],
+			});
+
+			await this.noteReadService.read(me.id, mutedNotes);
+
+			await this.noteThreadMutingsRepository.insert({
+				id: this.idService.genId(),
+				createdAt: new Date(),
+				threadId: note.threadId ?? note.id,
+				userId: me.id,
+			});
+		});
+	}
+}

@@ -1,26 +1,36 @@
-import { EventEmitter } from 'events';
-import Emitter from 'strict-event-emitter-types';
-import { Channel } from '@/models/entities/channel';
-import { User } from '@/models/entities/user';
-import { UserProfile } from '@/models/entities/user-profile';
-import { Note } from '@/models/entities/note';
-import { Antenna } from '@/models/entities/antenna';
-import { DriveFile } from '@/models/entities/drive-file';
-import { DriveFolder } from '@/models/entities/drive-folder';
-import { Emoji } from '@/models/entities/emoji';
-import { UserList } from '@/models/entities/user-list';
-import { MessagingMessage } from '@/models/entities/messaging-message';
-import { UserGroup } from '@/models/entities/user-group';
-import { AbuseUserReport } from '@/models/entities/abuse-user-report';
-import { Signin } from '@/models/entities/signin';
-import { Page } from '@/models/entities/page';
-import { Packed } from '@/misc/schema';
+import type { Channel } from '@/models/entities/Channel.js';
+import type { User } from '@/models/entities/User.js';
+import type { UserProfile } from '@/models/entities/UserProfile.js';
+import type { Note } from '@/models/entities/Note.js';
+import type { Antenna } from '@/models/entities/Antenna.js';
+import type { DriveFile } from '@/models/entities/DriveFile.js';
+import type { DriveFolder } from '@/models/entities/DriveFolder.js';
+import type { UserList } from '@/models/entities/UserList.js';
+import type { MessagingMessage } from '@/models/entities/MessagingMessage.js';
+import type { UserGroup } from '@/models/entities/UserGroup.js';
+import type { AbuseUserReport } from '@/models/entities/AbuseUserReport.js';
+import type { Signin } from '@/models/entities/Signin.js';
+import type { Page } from '@/models/entities/Page.js';
+import type { Packed } from '@/misc/schema.js';
+import type { Webhook } from '@/models/entities/Webhook.js';
+import type { Meta } from '@/models/entities/Meta.js';
+import type Emitter from 'strict-event-emitter-types';
+import type { EventEmitter } from 'events';
 
 //#region Stream type-body definitions
 export interface InternalStreamTypes {
+	userChangeSuspendedState: { id: User['id']; isSuspended: User['isSuspended']; };
+	userChangeSilencedState: { id: User['id']; isSilenced: User['isSilenced']; };
+	userChangeModeratorState: { id: User['id']; isModerator: User['isModerator']; };
+	userTokenRegenerated: { id: User['id']; oldToken: User['token']; newToken: User['token']; };
+	remoteUserUpdated: { id: User['id']; };
+	webhookCreated: Webhook;
+	webhookDeleted: Webhook;
+	webhookUpdated: Webhook;
 	antennaCreated: Antenna;
 	antennaDeleted: Antenna;
 	antennaUpdated: Antenna;
+	metaUpdated: Meta,
 }
 
 export interface BroadcastTypes {
@@ -84,6 +94,7 @@ export interface MainStreamTypes {
 	};
 	driveFileCreated: Packed<'DriveFile'>;
 	readAntenna: Antenna;
+	receiveFollowRequest: Packed<'User'>;
 }
 
 export interface DriveStreamTypes {

@@ -1,8 +1,8 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { GalleryPosts } from '@/models/index';
-import { ID } from '@/misc/cafy-id';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { GalleryPostsRepository } from '@/models/index.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['gallery'],
@@ -10,12 +10,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:gallery',
-
-	params: {
-		postId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchPost: {
@@ -26,16 +20,32 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		postId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['postId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const post = await GalleryPosts.findOne({
-		id: ps.postId,
-		userId: user.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.galleryPostsRepository)
+		private galleryPostsRepository: GalleryPostsRepository,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const post = await this.galleryPostsRepository.findOneBy({
+				id: ps.postId,
+				userId: me.id,
+			});
 
-	if (post == null) {
-		throw new ApiError(meta.errors.noSuchPost);
+			if (post == null) {
+				throw new ApiError(meta.errors.noSuchPost);
+			}
+
+			await this.galleryPostsRepository.delete(post.id);
+		});
 	}
-
-	await GalleryPosts.delete(post.id);
-});
+}

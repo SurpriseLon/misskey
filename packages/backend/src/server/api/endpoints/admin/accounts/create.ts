@@ -1,19 +1,14 @@
-import define from '../../../define';
-import { Users } from '@/models/index';
-import { signup } from '../../../common/signup';
+import { Inject, Injectable } from '@nestjs/common';
+import { IsNull } from 'typeorm';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { UsersRepository } from '@/models/index.js';
+import { SignupService } from '@/core/SignupService.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
+import { localUsernameSchema, passwordSchema } from '@/models/entities/User.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['admin'],
-
-	params: {
-		username: {
-			validator: Users.validateLocalUsername,
-		},
-
-		password: {
-			validator: Users.validatePassword,
-		},
-	},
 
 	res: {
 		type: 'object',
@@ -28,25 +23,45 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		username: localUsernameSchema,
+		password: passwordSchema,
+	},
+	required: ['username', 'password'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, _me) => {
-	const me = _me ? await Users.findOneOrFail(_me.id) : null;
-	const noUsers = (await Users.count({
-		host: null,
-	})) === 0;
-	if (!noUsers && !me?.isAdmin) throw new Error('access denied');
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	const { account, secret } = await signup({
-		username: ps.username,
-		password: ps.password,
-	});
+		private userEntityService: UserEntityService,
+		private signupService: SignupService,
+	) {
+		super(meta, paramDef, async (ps, _me) => {
+			const me = _me ? await this.usersRepository.findOneByOrFail({ id: _me.id }) : null;
+			const noUsers = (await this.usersRepository.countBy({
+				host: IsNull(),
+			})) === 0;
+			if (!noUsers && !me?.isAdmin) throw new Error('access denied');
 
-	const res = await Users.pack(account, account, {
-		detail: true,
-		includeSecrets: true,
-	});
+			const { account, secret } = await this.signupService.signup({
+				username: ps.username,
+				password: ps.password,
+			});
 
-	(res as any).token = secret;
+			const res = await this.userEntityService.pack(account, account, {
+				detail: true,
+				includeSecrets: true,
+			});
 
-	return res;
-});
+			(res as any).token = secret;
+
+			return res;
+		});
+	}
+}

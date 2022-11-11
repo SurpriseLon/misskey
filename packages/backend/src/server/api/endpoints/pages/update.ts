@@ -1,10 +1,10 @@
-import $ from 'cafy';
 import ms from 'ms';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Pages, DriveFiles } from '@/models/index';
-import { ID } from '@/misc/cafy-id';
 import { Not } from 'typeorm';
+import { Inject, Injectable } from '@nestjs/common';
+import type { PagesRepository, DriveFilesRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['pages'],
@@ -16,52 +16,6 @@ export const meta = {
 	limit: {
 		duration: ms('1hour'),
 		max: 300,
-	},
-
-	params: {
-		pageId: {
-			validator: $.type(ID),
-		},
-
-		title: {
-			validator: $.str,
-		},
-
-		name: {
-			validator: $.str.min(1),
-		},
-
-		summary: {
-			validator: $.optional.nullable.str,
-		},
-
-		content: {
-			validator: $.arr($.obj()),
-		},
-
-		variables: {
-			validator: $.arr($.obj()),
-		},
-
-		script: {
-			validator: $.str,
-		},
-
-		eyeCatchingImageId: {
-			validator: $.optional.nullable.type(ID),
-		},
-
-		font: {
-			validator: $.optional.str.or(['serif', 'sans-serif']),
-		},
-
-		alignCenter: {
-			validator: $.optional.bool,
-		},
-
-		hideTitleWhenPinned: {
-			validator: $.optional.bool,
-		},
 	},
 
 	errors: {
@@ -90,53 +44,86 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		pageId: { type: 'string', format: 'misskey:id' },
+		title: { type: 'string' },
+		name: { type: 'string', minLength: 1 },
+		summary: { type: 'string', nullable: true },
+		content: { type: 'array', items: {
+			type: 'object', additionalProperties: true,
+		} },
+		variables: { type: 'array', items: {
+			type: 'object', additionalProperties: true,
+		} },
+		script: { type: 'string' },
+		eyeCatchingImageId: { type: 'string', format: 'misskey:id', nullable: true },
+		font: { type: 'string', enum: ['serif', 'sans-serif'] },
+		alignCenter: { type: 'boolean' },
+		hideTitleWhenPinned: { type: 'boolean' },
+	},
+	required: ['pageId', 'title', 'name', 'content', 'variables', 'script'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const page = await Pages.findOne(ps.pageId);
-	if (page == null) {
-		throw new ApiError(meta.errors.noSuchPage);
-	}
-	if (page.userId !== user.id) {
-		throw new ApiError(meta.errors.accessDenied);
-	}
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.pagesRepository)
+		private pagesRepository: PagesRepository,
 
-	let eyeCatchingImage = null;
-	if (ps.eyeCatchingImageId != null) {
-		eyeCatchingImage = await DriveFiles.findOne({
-			id: ps.eyeCatchingImageId,
-			userId: user.id,
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const page = await this.pagesRepository.findOneBy({ id: ps.pageId });
+			if (page == null) {
+				throw new ApiError(meta.errors.noSuchPage);
+			}
+			if (page.userId !== me.id) {
+				throw new ApiError(meta.errors.accessDenied);
+			}
+
+			let eyeCatchingImage = null;
+			if (ps.eyeCatchingImageId != null) {
+				eyeCatchingImage = await this.driveFilesRepository.findOneBy({
+					id: ps.eyeCatchingImageId,
+					userId: me.id,
+				});
+
+				if (eyeCatchingImage == null) {
+					throw new ApiError(meta.errors.noSuchFile);
+				}
+			}
+
+			await this.pagesRepository.findBy({
+				id: Not(ps.pageId),
+				userId: me.id,
+				name: ps.name,
+			}).then(result => {
+				if (result.length > 0) {
+					throw new ApiError(meta.errors.nameAlreadyExists);
+				}
+			});
+
+			await this.pagesRepository.update(page.id, {
+				updatedAt: new Date(),
+				title: ps.title,
+				name: ps.name === undefined ? page.name : ps.name,
+				summary: ps.name === undefined ? page.summary : ps.summary,
+				content: ps.content,
+				variables: ps.variables,
+				script: ps.script,
+				alignCenter: ps.alignCenter === undefined ? page.alignCenter : ps.alignCenter,
+				hideTitleWhenPinned: ps.hideTitleWhenPinned === undefined ? page.hideTitleWhenPinned : ps.hideTitleWhenPinned,
+				font: ps.font === undefined ? page.font : ps.font,
+				eyeCatchingImageId: ps.eyeCatchingImageId === null
+					? null
+					: ps.eyeCatchingImageId === undefined
+						? page.eyeCatchingImageId
+						: eyeCatchingImage!.id,
+			});
 		});
-
-		if (eyeCatchingImage == null) {
-			throw new ApiError(meta.errors.noSuchFile);
-		}
 	}
-
-	await Pages.find({
-		id: Not(ps.pageId),
-		userId: user.id,
-		name: ps.name,
-	}).then(result => {
-		if (result.length > 0) {
-			throw new ApiError(meta.errors.nameAlreadyExists);
-		}
-	});
-
-	await Pages.update(page.id, {
-		updatedAt: new Date(),
-		title: ps.title,
-		name: ps.name === undefined ? page.name : ps.name,
-		summary: ps.name === undefined ? page.summary : ps.summary,
-		content: ps.content,
-		variables: ps.variables,
-		script: ps.script,
-		alignCenter: ps.alignCenter === undefined ? page.alignCenter : ps.alignCenter,
-		hideTitleWhenPinned: ps.hideTitleWhenPinned === undefined ? page.hideTitleWhenPinned : ps.hideTitleWhenPinned,
-		font: ps.font === undefined ? page.font : ps.font,
-		eyeCatchingImageId: ps.eyeCatchingImageId === null
-			? null
-			: ps.eyeCatchingImageId === undefined
-				? page.eyeCatchingImageId
-				: eyeCatchingImage!.id,
-	});
-});
+}

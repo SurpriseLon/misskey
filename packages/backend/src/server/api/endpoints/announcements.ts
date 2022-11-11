@@ -1,33 +1,13 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../define';
-import { Announcements, AnnouncementReads } from '@/models/index';
-import { makePaginationQuery } from '../common/make-pagination-query';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { QueryService } from '@/core/QueryService.js';
+import { DI } from '@/di-symbols.js';
+import type { AnnouncementReadsRepository, AnnouncementsRepository } from '@/models/index.js';
 
 export const meta = {
 	tags: ['meta'],
 
 	requireCredential: false,
-
-	params: {
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-
-		withUnreads: {
-			validator: $.optional.boolean,
-			default: false,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-	},
 
 	res: {
 		type: 'array',
@@ -73,25 +53,49 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		withUnreads: { type: 'boolean', default: false },
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+	},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const query = makePaginationQuery(Announcements.createQueryBuilder('announcement'), ps.sinceId, ps.untilId);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.announcementsRepository)
+		private announcementsRepository: AnnouncementsRepository,
 
-	const announcements = await query.take(ps.limit!).getMany();
+		@Inject(DI.announcementReadsRepository)
+		private announcementReadsRepository: AnnouncementReadsRepository,
 
-	if (user) {
-		const reads = (await AnnouncementReads.find({
-			userId: user.id,
-		})).map(x => x.announcementId);
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = this.queryService.makePaginationQuery(this.announcementsRepository.createQueryBuilder('announcement'), ps.sinceId, ps.untilId);
 
-		for (const announcement of announcements) {
-			(announcement as any).isRead = reads.includes(announcement.id);
-		}
+			const announcements = await query.take(ps.limit).getMany();
+
+			if (me) {
+				const reads = (await this.announcementReadsRepository.findBy({
+					userId: me.id,
+				})).map(x => x.announcementId);
+
+				for (const announcement of announcements) {
+					(announcement as any).isRead = reads.includes(announcement.id);
+				}
+			}
+
+			return (ps.withUnreads ? announcements.filter((a: any) => !a.isRead) : announcements).map((a) => ({
+				...a,
+				createdAt: a.createdAt.toISOString(),
+				updatedAt: a.updatedAt?.toISOString() ?? null,
+			}));
+		});
 	}
-
-	return (ps.withUnreads ? announcements.filter((a: any) => !a.isRead) : announcements).map((a) => ({
-		...a,
-		createdAt: a.createdAt.toISOString(),
-		updatedAt: a.updatedAt?.toISOString() ?? null,
-	}));
-});
+}

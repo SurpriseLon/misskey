@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { UserGroups } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UserGroupsRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { UserGroupEntityService } from '@/core/entities/UserGroupEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['groups'],
@@ -11,15 +12,7 @@ export const meta = {
 
 	kind: 'write:user-groups',
 
-	params: {
-		groupId: {
-			validator: $.type(ID),
-		},
-
-		name: {
-			validator: $.str.range(1, 100),
-		},
-	},
+	description: 'Update the properties of a group.',
 
 	res: {
 		type: 'object',
@@ -36,21 +29,40 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		groupId: { type: 'string', format: 'misskey:id' },
+		name: { type: 'string', minLength: 1, maxLength: 100 },
+	},
+	required: ['groupId', 'name'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	// Fetch the group
-	const userGroup = await UserGroups.findOne({
-		id: ps.groupId,
-		userId: me.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.userGroupsRepository)
+		private userGroupsRepository: UserGroupsRepository,
 
-	if (userGroup == null) {
-		throw new ApiError(meta.errors.noSuchGroup);
+		private userGroupEntityService: UserGroupEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Fetch the group
+			const userGroup = await this.userGroupsRepository.findOneBy({
+				id: ps.groupId,
+				userId: me.id,
+			});
+
+			if (userGroup == null) {
+				throw new ApiError(meta.errors.noSuchGroup);
+			}
+
+			await this.userGroupsRepository.update(userGroup.id, {
+				name: ps.name,
+			});
+
+			return await this.userGroupEntityService.pack(userGroup.id);
+		});
 	}
-
-	await UserGroups.update(userGroup.id, {
-		name: ps.name,
-	});
-
-	return await UserGroups.pack(userGroup.id);
-});
+}

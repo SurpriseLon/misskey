@@ -1,9 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import { removePinned } from '@/services/i/pin';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Users } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { UsersRepository } from '@/models/index.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
+import { NotePiningService } from '@/core/NotePiningService.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['account', 'notes'],
@@ -11,12 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:account',
-
-	params: {
-		noteId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchNote: {
@@ -33,14 +27,30 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	await removePinned(user, ps.noteId).catch(e => {
-		if (e.id === 'b302d4cf-c050-400a-bbb3-be208681f40c') throw new ApiError(meta.errors.noSuchNote);
-		throw e;
-	});
+export const paramDef = {
+	type: 'object',
+	properties: {
+		noteId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['noteId'],
+} as const;
 
-	return await Users.pack<true, true>(user.id, user, {
-		detail: true,
-	});
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		private userEntityService: UserEntityService,
+		private notePiningService: NotePiningService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			await this.notePiningService.removePinned(me, ps.noteId).catch(err => {
+				if (err.id === 'b302d4cf-c050-400a-bbb3-be208681f40c') throw new ApiError(meta.errors.noSuchNote);
+				throw err;
+			});
+
+			return await this.userEntityService.pack<true, true>(me.id, me, {
+				detail: true,
+			});
+		});
+	}
+}

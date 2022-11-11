@@ -1,9 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { GalleryPosts, GalleryLikes } from '@/models/index';
-import { genId } from '@/misc/gen-id';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { GalleryLikesRepository, GalleryPostsRepository } from '@/models/index.js';
+import { IdService } from '@/core/IdService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['gallery'],
@@ -11,12 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:gallery-likes',
-
-	params: {
-		postId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchPost: {
@@ -39,34 +33,55 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		postId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['postId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const post = await GalleryPosts.findOne(ps.postId);
-	if (post == null) {
-		throw new ApiError(meta.errors.noSuchPost);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.galleryPostsRepository)
+		private galleryPostsRepository: GalleryPostsRepository,
+
+		@Inject(DI.galleryLikesRepository)
+		private galleryLikesRepository: GalleryLikesRepository,
+
+		private idService: IdService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const post = await this.galleryPostsRepository.findOneBy({ id: ps.postId });
+			if (post == null) {
+				throw new ApiError(meta.errors.noSuchPost);
+			}
+
+			if (post.userId === me.id) {
+				throw new ApiError(meta.errors.yourPost);
+			}
+
+			// if already liked
+			const exist = await this.galleryLikesRepository.findOneBy({
+				postId: post.id,
+				userId: me.id,
+			});
+
+			if (exist != null) {
+				throw new ApiError(meta.errors.alreadyLiked);
+			}
+
+			// Create like
+			await this.galleryLikesRepository.insert({
+				id: this.idService.genId(),
+				createdAt: new Date(),
+				postId: post.id,
+				userId: me.id,
+			});
+
+			this.galleryPostsRepository.increment({ id: post.id }, 'likedCount', 1);
+		});
 	}
-
-	if (post.userId === user.id) {
-		throw new ApiError(meta.errors.yourPost);
-	}
-
-	// if already liked
-	const exist = await GalleryLikes.findOne({
-		postId: post.id,
-		userId: user.id,
-	});
-
-	if (exist != null) {
-		throw new ApiError(meta.errors.alreadyLiked);
-	}
-
-	// Create like
-	await GalleryLikes.insert({
-		id: genId(),
-		createdAt: new Date(),
-		postId: post.id,
-		userId: user.id,
-	});
-
-	GalleryPosts.increment({ id: post.id }, 'likedCount', 1);
-});
+}

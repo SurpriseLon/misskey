@@ -1,8 +1,8 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Clips } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { ClipsRepository } from '@/models/index.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['clips'],
@@ -10,12 +10,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:account',
-
-	params: {
-		clipId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchClip: {
@@ -26,16 +20,32 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		clipId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['clipId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const clip = await Clips.findOne({
-		id: ps.clipId,
-		userId: user.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.clipsRepository)
+		private clipsRepository: ClipsRepository,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const clip = await this.clipsRepository.findOneBy({
+				id: ps.clipId,
+				userId: me.id,
+			});
 
-	if (clip == null) {
-		throw new ApiError(meta.errors.noSuchClip);
+			if (clip == null) {
+				throw new ApiError(meta.errors.noSuchClip);
+			}
+
+			await this.clipsRepository.delete(clip.id);
+		});
 	}
-
-	await Clips.delete(clip.id);
-});
+}

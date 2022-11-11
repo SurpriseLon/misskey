@@ -1,22 +1,14 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { Apps, AuthSessions, AccessTokens, Users } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { UsersRepository, AppsRepository, AccessTokensRepository, AuthSessionsRepository } from '@/models/index.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['auth'],
 
 	requireCredential: false,
-
-	params: {
-		appSecret: {
-			validator: $.str,
-		},
-
-		token: {
-			validator: $.str,
-		},
-	},
 
 	res: {
 		type: 'object',
@@ -56,44 +48,72 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		appSecret: { type: 'string' },
+		token: { type: 'string' },
+	},
+	required: ['appSecret', 'token'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps) => {
-	// Lookup app
-	const app = await Apps.findOne({
-		secret: ps.appSecret,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	if (app == null) {
-		throw new ApiError(meta.errors.noSuchApp);
+		@Inject(DI.appsRepository)
+		private appsRepository: AppsRepository,
+
+		@Inject(DI.authSessionsRepository)
+		private authSessionsRepository: AuthSessionsRepository,
+
+		@Inject(DI.accessTokensRepository)
+		private accessTokensRepository: AccessTokensRepository,
+
+		private userEntityService: UserEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Lookup app
+			const app = await this.appsRepository.findOneBy({
+				secret: ps.appSecret,
+			});
+
+			if (app == null) {
+				throw new ApiError(meta.errors.noSuchApp);
+			}
+
+			// Fetch token
+			const session = await this.authSessionsRepository.findOneBy({
+				token: ps.token,
+				appId: app.id,
+			});
+
+			if (session == null) {
+				throw new ApiError(meta.errors.noSuchSession);
+			}
+
+			if (session.userId == null) {
+				throw new ApiError(meta.errors.pendingSession);
+			}
+
+			// Lookup access token
+			const accessToken = await this.accessTokensRepository.findOneByOrFail({
+				appId: app.id,
+				userId: session.userId,
+			});
+
+			// Delete session
+			this.authSessionsRepository.delete(session.id);
+
+			return {
+				accessToken: accessToken.token,
+				user: await this.userEntityService.pack(session.userId, null, {
+					detail: true,
+				}),
+			};
+		});
 	}
-
-	// Fetch token
-	const session = await AuthSessions.findOne({
-		token: ps.token,
-		appId: app.id,
-	});
-
-	if (session == null) {
-		throw new ApiError(meta.errors.noSuchSession);
-	}
-
-	if (session.userId == null) {
-		throw new ApiError(meta.errors.pendingSession);
-	}
-
-	// Lookup access token
-	const accessToken = await AccessTokens.findOneOrFail({
-		appId: app.id,
-		userId: session.userId,
-	});
-
-	// Delete session
-	AuthSessions.delete(session.id);
-
-	return {
-		accessToken: accessToken.token,
-		user: await Users.pack(session.userId, null, {
-			detail: true,
-		}),
-	};
-});
+}

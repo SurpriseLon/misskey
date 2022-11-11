@@ -1,91 +1,68 @@
 <template>
-<XColumn v-if="deckStore.state.alwaysShowMainColumn || $route.name !== 'index'" :column="column" :is-stacked="isStacked">
+<XColumn v-if="deckStore.state.alwaysShowMainColumn || mainRouter.currentRoute.value.name !== 'index'" :column="column" :is-stacked="isStacked" @parent-focus="$event => emit('parent-focus', $event)">
 	<template #header>
-		<template v-if="pageInfo">
-			<i :class="pageInfo.icon"></i>
-			{{ pageInfo.title }}
+		<template v-if="pageMetadata?.value">
+			<i :class="pageMetadata?.value.icon"></i>
+			{{ pageMetadata?.value.title }}
 		</template>
 	</template>
 
-	<MkStickyContainer>
-		<template #header><MkHeader v-if="pageInfo && !pageInfo.hideHeader" :info="pageInfo"/></template>
-		<router-view v-slot="{ Component }">
-			<transition>
-				<keep-alive :include="['MkTimelinePage']">
-					<component :is="Component" :ref="changePage" @contextmenu.stop="onContextmenu"/>
-				</keep-alive>
-			</transition>
-		</router-view>
-	</MkStickyContainer>
+	<RouterView @contextmenu.stop="onContextmenu"/>
 </XColumn>
 </template>
 
-<script lang="ts">
-import { defineComponent } from 'vue';
+<script lang="ts" setup>
+import { ComputedRef, provide } from 'vue';
 import XColumn from './column.vue';
-import XNotes from '@/components/notes.vue';
-import { deckStore } from '@/ui/deck/deck-store';
+import { deckStore, Column } from '@/ui/deck/deck-store';
 import * as os from '@/os';
-import * as symbols from '@/symbols';
+import { i18n } from '@/i18n';
+import { mainRouter } from '@/router';
+import { PageMetadata, provideMetadataReceiver, setPageMetadata } from '@/scripts/page-metadata';
 
-export default defineComponent({
-	components: {
-		XColumn,
-		XNotes
-	},
+defineProps<{
+	column: Column;
+	isStacked: boolean;
+}>();
 
-	props: {
-		column: {
-			type: Object,
-			required: true
-		},
-		isStacked: {
-			type: Boolean,
-			required: true
-		}
-	},
+const emit = defineEmits<{
+	(ev: 'parent-focus', direction: 'up' | 'down' | 'left' | 'right'): void;
+}>();
 
-	data() {
-		return {
-			deckStore,
-			pageInfo: null,
-		}
-	},
+let pageMetadata = $ref<null | ComputedRef<PageMetadata>>();
 
-	methods: {
-		changePage(page) {
-			if (page == null) return;
-			if (page[symbols.PAGE_INFO]) {
-				this.pageInfo = page[symbols.PAGE_INFO];
-			}
-		},
-
-		back() {
-			history.back();
-		},
-
-		onContextmenu(ev: MouseEvent) {
-			const isLink = (el: HTMLElement) => {
-				if (el.tagName === 'A') return true;
-				if (el.parentElement) {
-					return isLink(el.parentElement);
-				}
-			};
-			if (isLink(ev.target)) return;
-			if (['INPUT', 'TEXTAREA', 'IMG', 'VIDEO', 'CANVAS'].includes(ev.target.tagName) || ev.target.attributes['contenteditable']) return;
-			if (window.getSelection().toString() !== '') return;
-			const path = this.$route.path;
-			os.contextMenu([{
-				type: 'label',
-				text: path,
-			}, {
-				icon: 'fas fa-window-maximize',
-				text: this.$ts.openInWindow,
-				action: () => {
-					os.pageWindow(path);
-				}
-			}], ev);
-		},
-	}
+provide('router', mainRouter);
+provideMetadataReceiver((info) => {
+	pageMetadata = info;
 });
+
+/*
+function back() {
+	history.back();
+}
+*/
+function onContextmenu(ev: MouseEvent) {
+	if (!ev.target) return;
+
+	const isLink = (el: HTMLElement) => {
+		if (el.tagName === 'A') return true;
+		if (el.parentElement) {
+			return isLink(el.parentElement);
+		}
+	};
+	if (isLink(ev.target as HTMLElement)) return;
+	if (['INPUT', 'TEXTAREA', 'IMG', 'VIDEO', 'CANVAS'].includes((ev.target as HTMLElement).tagName) || (ev.target as HTMLElement).attributes['contenteditable']) return;
+	if (window.getSelection()?.toString() !== '') return;
+	const path = mainRouter.currentRoute.value.path;
+	os.contextMenu([{
+		type: 'label',
+		text: path,
+	}, {
+		icon: 'fas fa-window-maximize',
+		text: i18n.ts.openInWindow,
+		action: () => {
+			os.pageWindow(path);
+		},
+	}], ev);
+}
 </script>

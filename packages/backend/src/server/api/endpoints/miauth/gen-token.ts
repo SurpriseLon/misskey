@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import define from '../../define';
-import { AccessTokens } from '@/models/index';
-import { genId } from '@/misc/gen-id';
-import { secureRndstr } from '@/misc/secure-rndstr';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { AccessTokensRepository } from '@/models/index.js';
+import { IdService } from '@/core/IdService.js';
+import { secureRndstr } from '@/misc/secure-rndstr.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['auth'],
@@ -10,28 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	secure: true,
-
-	params: {
-		session: {
-			validator: $.nullable.str,
-		},
-
-		name: {
-			validator: $.nullable.optional.str,
-		},
-
-		description: {
-			validator: $.nullable.optional.str,
-		},
-
-		iconUrl: {
-			validator: $.nullable.optional.str,
-		},
-
-		permission: {
-			validator: $.arr($.str).unique(),
-		},
-	},
 
 	res: {
 		type: 'object',
@@ -45,29 +24,53 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		session: { type: 'string', nullable: true },
+		name: { type: 'string', nullable: true },
+		description: { type: 'string', nullable: true },
+		iconUrl: { type: 'string', nullable: true },
+		permission: { type: 'array', uniqueItems: true, items: {
+			type: 'string',
+		} },
+	},
+	required: ['session', 'permission'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	// Generate access token
-	const accessToken = secureRndstr(32, true);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.accessTokensRepository)
+		private accessTokensRepository: AccessTokensRepository,
 
-	const now = new Date();
+		private idService: IdService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Generate access token
+			const accessToken = secureRndstr(32, true);
 
-	// Insert access token doc
-	await AccessTokens.insert({
-		id: genId(),
-		createdAt: now,
-		lastUsedAt: now,
-		session: ps.session,
-		userId: user.id,
-		token: accessToken,
-		hash: accessToken,
-		name: ps.name,
-		description: ps.description,
-		iconUrl: ps.iconUrl,
-		permission: ps.permission,
-	});
+			const now = new Date();
 
-	return {
-		token: accessToken,
-	};
-});
+			// Insert access token doc
+			await this.accessTokensRepository.insert({
+				id: this.idService.genId(),
+				createdAt: now,
+				lastUsedAt: now,
+				session: ps.session,
+				userId: me.id,
+				token: accessToken,
+				hash: accessToken,
+				name: ps.name,
+				description: ps.description,
+				iconUrl: ps.iconUrl,
+				permission: ps.permission,
+			});
+
+			return {
+				token: accessToken,
+			};
+		});
+	}
+}

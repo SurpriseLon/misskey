@@ -1,21 +1,15 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { getNote } from '../../common/getters';
-import { PromoReads } from '@/models/index';
-import { genId } from '@/misc/gen-id';
+import { Inject, Injectable } from '@nestjs/common';
+import type { PromoReadsRepository } from '@/models/index.js';
+import { IdService } from '@/core/IdService.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
+import { GetterService } from '@/server/api/GetterService.js';
 
 export const meta = {
 	tags: ['notes'],
 
 	requireCredential: true,
-
-	params: {
-		noteId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchNote: {
@@ -26,26 +20,45 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		noteId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['noteId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const note = await getNote(ps.noteId).catch(e => {
-		if (e.id === '9725d0ce-ba28-4dde-95a7-2cbb2c15de24') throw new ApiError(meta.errors.noSuchNote);
-		throw e;
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.promoReadsRepository)
+		private promoReadsRepository: PromoReadsRepository,
 
-	const exist = await PromoReads.findOne({
-		noteId: note.id,
-		userId: user.id,
-	});
+		private idService: IdService,
+		private getterService: GetterService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const note = await this.getterService.getNote(ps.noteId).catch(err => {
+				if (err.id === '9725d0ce-ba28-4dde-95a7-2cbb2c15de24') throw new ApiError(meta.errors.noSuchNote);
+				throw err;
+			});
 
-	if (exist != null) {
-		return;
+			const exist = await this.promoReadsRepository.findOneBy({
+				noteId: note.id,
+				userId: me.id,
+			});
+
+			if (exist != null) {
+				return;
+			}
+
+			await this.promoReadsRepository.insert({
+				id: this.idService.genId(),
+				createdAt: new Date(),
+				noteId: note.id,
+				userId: me.id,
+			});
+		});
 	}
-
-	await PromoReads.insert({
-		id: genId(),
-		createdAt: new Date(),
-		noteId: note.id,
-		userId: user.id,
-	});
-});
+}

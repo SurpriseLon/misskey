@@ -1,11 +1,11 @@
 <template>
 <div class="_formRoot">
 	<div class="llvierxe" :style="{ backgroundImage: $i.bannerUrl ? `url(${ $i.bannerUrl })` : null }">
-		<div class="avatar _acrylic">
+		<div class="avatar">
 			<MkAvatar class="avatar" :user="$i" :disable-link="true" @click="changeAvatar"/>
-			<MkButton primary class="avatarEdit" @click="changeAvatar">{{ i18n.ts._profile.changeAvatar }}</MkButton>
+			<MkButton primary rounded class="avatarEdit" @click="changeAvatar">{{ i18n.ts._profile.changeAvatar }}</MkButton>
 		</div>
-		<MkButton primary class="bannerEdit" @click="changeBanner">{{ i18n.ts._profile.changeBanner }}</MkButton>
+		<MkButton primary rounded class="bannerEdit" @click="changeBanner">{{ i18n.ts._profile.changeBanner }}</MkButton>
 	</div>
 
 	<FormInput v-model="profile.name" :max="30" manual-save class="_formBlock">
@@ -29,36 +29,53 @@
 
 	<FormSelect v-model="profile.lang" class="_formBlock">
 		<template #label>{{ i18n.ts.language }}</template>
-		<option v-for="x in langs" :key="x[0]" :value="x[0]">{{ x[1] }}</option>
+		<option v-for="x in Object.keys(langmap)" :key="x" :value="x">{{ langmap[x].nativeName }}</option>
 	</FormSelect>
 
-	<FormSlot>
-		<MkButton @click="editMetadata">{{ i18n.ts._profile.metadataEdit }}</MkButton>
+	<FormSlot class="_formBlock">
+		<FormFolder>
+			<template #icon><i class="fas fa-table-list"></i></template>
+			<template #label>{{ i18n.ts._profile.metadataEdit }}</template>
+
+			<div class="_formRoot">
+				<FormSplit v-for="(record, i) in fields" :min-width="250" class="_formBlock">
+					<FormInput v-model="record.name" small>
+						<template #label>{{ i18n.ts._profile.metadataLabel }} #{{ i + 1 }}</template>
+					</FormInput>
+					<FormInput v-model="record.value" small>
+						<template #label>{{ i18n.ts._profile.metadataContent }} #{{ i + 1 }}</template>
+					</FormInput>
+				</FormSplit>
+				<MkButton :disabled="fields.length >= 16" inline style="margin-right: 8px;" @click="addField"><i class="fas fa-plus"></i> {{ i18n.ts.add }}</MkButton>
+				<MkButton inline primary @click="saveFields"><i class="fas fa-check"></i> {{ i18n.ts.save }}</MkButton>
+			</div>
+		</FormFolder>
 		<template #caption>{{ i18n.ts._profile.metadataDescription }}</template>
 	</FormSlot>
 
 	<FormSwitch v-model="profile.isCat" class="_formBlock">{{ i18n.ts.flagAsCat }}<template #caption>{{ i18n.ts.flagAsCatDescription }}</template></FormSwitch>
-	<FormSwitch v-model="profile.showTimelineReplies" class="_formBlock">{{ i18n.ts.flagShowTimelineReplies }}<template #caption>{{ i18n.ts.flagShowTimelineRepliesDescription }}</template></FormSwitch>
+	<FormSwitch v-model="profile.showTimelineReplies" class="_formBlock">{{ i18n.ts.flagShowTimelineReplies }}<template #caption>{{ i18n.ts.flagShowTimelineRepliesDescription }} {{ i18n.ts.reflectMayTakeTime }}</template></FormSwitch>
 	<FormSwitch v-model="profile.isBot" class="_formBlock">{{ i18n.ts.flagAsBot }}<template #caption>{{ i18n.ts.flagAsBotDescription }}</template></FormSwitch>
-
-	<FormSwitch v-model="profile.alwaysMarkNsfw" class="_formBlock">{{ i18n.ts.alwaysMarkSensitive }}</FormSwitch>
 </div>
 </template>
 
 <script lang="ts" setup>
-import { defineComponent, reactive, watch } from 'vue';
-import MkButton from '@/components/ui/button.vue';
+import { reactive, watch } from 'vue';
+import MkButton from '@/components/MkButton.vue';
 import FormInput from '@/components/form/input.vue';
 import FormTextarea from '@/components/form/textarea.vue';
 import FormSwitch from '@/components/form/switch.vue';
 import FormSelect from '@/components/form/select.vue';
+import FormSplit from '@/components/form/split.vue';
+import FormFolder from '@/components/form/folder.vue';
 import FormSlot from '@/components/form/slot.vue';
-import { host, langs } from '@/config';
+import { host } from '@/config';
 import { selectFile } from '@/scripts/select-file';
 import * as os from '@/os';
-import * as symbols from '@/symbols';
 import { i18n } from '@/i18n';
 import { $i } from '@/account';
+import { langmap } from '@/scripts/langmap';
+import { definePageMetadata } from '@/scripts/page-metadata';
 
 const profile = reactive({
 	name: $i.name,
@@ -69,18 +86,6 @@ const profile = reactive({
 	isBot: $i.isBot,
 	isCat: $i.isCat,
 	showTimelineReplies: $i.showTimelineReplies,
-	alwaysMarkNsfw: $i.alwaysMarkNsfw,
-});
-
-const additionalFields = reactive({
-	fieldName0: $i.fields[0] ? $i.fields[0].name : null,
-	fieldValue0: $i.fields[0] ? $i.fields[0].value : null,
-	fieldName1: $i.fields[1] ? $i.fields[1].name : null,
-	fieldValue1: $i.fields[1] ? $i.fields[1].value : null,
-	fieldName2: $i.fields[2] ? $i.fields[2].name : null,
-	fieldValue2: $i.fields[2] ? $i.fields[2].value : null,
-	fieldName3: $i.fields[3] ? $i.fields[3].name : null,
-	fieldValue3: $i.fields[3] ? $i.fields[3].value : null,
 });
 
 watch(() => profile, () => {
@@ -88,6 +93,25 @@ watch(() => profile, () => {
 }, {
 	deep: true,
 });
+
+const fields = reactive($i.fields.map(field => ({ name: field.name, value: field.value })));
+
+function addField() {
+	fields.push({
+		name: '',
+		value: '',
+	});
+}
+
+while (fields.length < 4) {
+	addField();
+}
+
+function saveFields() {
+	os.apiWithDialog('i/update', {
+		fields: fields.filter(field => field.name !== '' && field.value !== ''),
+	});
+}
 
 function save() {
 	os.apiWithDialog('i/update', {
@@ -99,14 +123,26 @@ function save() {
 		isBot: !!profile.isBot,
 		isCat: !!profile.isCat,
 		showTimelineReplies: !!profile.showTimelineReplies,
-		alwaysMarkNsfw: !!profile.alwaysMarkNsfw,
 	});
 }
 
 function changeAvatar(ev) {
 	selectFile(ev.currentTarget ?? ev.target, i18n.ts.avatar).then(async (file) => {
+		let originalOrCropped = file;
+
+		const { canceled } = await os.confirm({
+			type: 'question',
+			text: i18n.t('cropImageAsk'),
+		});
+
+		if (!canceled) {
+			originalOrCropped = await os.cropImage(file, {
+				aspectRatio: 1,
+			});
+		}
+
 		const i = await os.apiWithDialog('i/update', {
-			avatarId: file.id,
+			avatarId: originalOrCropped.id,
 		});
 		$i.avatarId = i.avatarId;
 		$i.avatarUrl = i.avatarUrl;
@@ -115,93 +151,34 @@ function changeAvatar(ev) {
 
 function changeBanner(ev) {
 	selectFile(ev.currentTarget ?? ev.target, i18n.ts.banner).then(async (file) => {
+		let originalOrCropped = file;
+
+		const { canceled } = await os.confirm({
+			type: 'question',
+			text: i18n.t('cropImageAsk'),
+		});
+
+		if (!canceled) {
+			originalOrCropped = await os.cropImage(file, {
+				aspectRatio: 2,
+			});
+		}
+
 		const i = await os.apiWithDialog('i/update', {
-			bannerId: file.id,
+			bannerId: originalOrCropped.id,
 		});
 		$i.bannerId = i.bannerId;
 		$i.bannerUrl = i.bannerUrl;
 	});
 }
 
-async function editMetadata() {
-	const { canceled, result } = await os.form(i18n.ts._profile.metadata, {
-		fieldName0: {
-			type: 'string',
-			label: i18n.ts._profile.metadataLabel + ' 1',
-			default: additionalFields.fieldName0,
-		},
-		fieldValue0: {
-			type: 'string',
-			label: i18n.ts._profile.metadataContent + ' 1',
-			default: additionalFields.fieldValue0,
-		},
-		fieldName1: {
-			type: 'string',
-			label: i18n.ts._profile.metadataLabel + ' 2',
-			default: additionalFields.fieldName1,
-		},
-		fieldValue1: {
-			type: 'string',
-			label: i18n.ts._profile.metadataContent + ' 2',
-			default: additionalFields.fieldValue1,
-		},
-		fieldName2: {
-			type: 'string',
-			label: i18n.ts._profile.metadataLabel + ' 3',
-			default: additionalFields.fieldName2,
-		},
-		fieldValue2: {
-			type: 'string',
-			label: i18n.ts._profile.metadataContent + ' 3',
-			default: additionalFields.fieldValue2,
-		},
-		fieldName3: {
-			type: 'string',
-			label: i18n.ts._profile.metadataLabel + ' 4',
-			default: additionalFields.fieldName3,
-		},
-		fieldValue3: {
-			type: 'string',
-			label: i18n.ts._profile.metadataContent + ' 4',
-			default: additionalFields.fieldValue3,
-		},
-	});
-	if (canceled) return;
+const headerActions = $computed(() => []);
 
-	additionalFields.fieldName0 = result.fieldName0;
-	additionalFields.fieldValue0 = result.fieldValue0;
-	additionalFields.fieldName1 = result.fieldName1;
-	additionalFields.fieldValue1 = result.fieldValue1;
-	additionalFields.fieldName2 = result.fieldName2;
-	additionalFields.fieldValue2 = result.fieldValue2;
-	additionalFields.fieldName3 = result.fieldName3;
-	additionalFields.fieldValue3 = result.fieldValue3;
+const headerTabs = $computed(() => []);
 
-	const fields = [
-		{ name: additionalFields.fieldName0, value: additionalFields.fieldValue0 },
-		{ name: additionalFields.fieldName1, value: additionalFields.fieldValue1 },
-		{ name: additionalFields.fieldName2, value: additionalFields.fieldValue2 },
-		{ name: additionalFields.fieldName3, value: additionalFields.fieldValue3 },
-	];
-
-	os.api('i/update', {
-		fields,
-	}).then(i => {
-		os.success();
-	}).catch(err => {
-		os.alert({
-			type: 'error',
-			text: err.id
-		});
-	});
-}
-
-defineExpose({
-	[symbols.PAGE_INFO]: {
-		title: i18n.ts.profile,
-		icon: 'fas fa-user',
-		bg: 'var(--bg)',
-	},
+definePageMetadata({
+	title: i18n.ts.profile,
+	icon: 'fas fa-user',
 });
 </script>
 
@@ -210,6 +187,7 @@ defineExpose({
 	position: relative;
 	background-size: cover;
 	background-position: center;
+	border: solid 1px var(--divider);
 	border-radius: 10px;
 	overflow: clip;
 

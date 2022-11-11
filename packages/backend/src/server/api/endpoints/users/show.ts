@@ -1,35 +1,21 @@
-import $ from 'cafy';
-import { resolveUser } from '@/remote/resolve-user';
-import define from '../../define';
-import { apiLogger } from '../../logger';
-import { ApiError } from '../../error';
-import { ID } from '@/misc/cafy-id';
-import { Users } from '@/models/index';
-import { In } from 'typeorm';
-import { User } from '@/models/entities/user';
+import { In, IsNull } from 'typeorm';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UsersRepository } from '@/models/index.js';
+import type { User } from '@/models/entities/User.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
+import { ResolveUserService } from '@/core/remote/ResolveUserService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
+import { ApiLoggerService } from '../../ApiLoggerService.js';
+import type { FindOptionsWhere } from 'typeorm';
 
 export const meta = {
 	tags: ['users'],
 
 	requireCredential: false,
 
-	params: {
-		userId: {
-			validator: $.optional.type(ID),
-		},
-
-		userIds: {
-			validator: $.optional.arr($.type(ID)).unique(),
-		},
-
-		username: {
-			validator: $.optional.str,
-		},
-
-		host: {
-			validator: $.optional.nullable.str,
-		},
-	},
+	description: 'Show the properties of a user.',
 
 	res: {
 		optional: false, nullable: false,
@@ -43,9 +29,9 @@ export const meta = {
 				items: {
 					type: 'object',
 					ref: 'UserDetailed',
-				}
+				},
 			},
-		]
+		],
 	},
 
 	errors: {
@@ -64,54 +50,97 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	anyOf: [
+		{
+			properties: {
+				userId: { type: 'string', format: 'misskey:id' },
+			},
+			required: ['userId'],
+		},
+		{
+			properties: {
+				userIds: { type: 'array', uniqueItems: true, items: {
+					type: 'string', format: 'misskey:id',
+				} },
+			},
+			required: ['userIds'],
+		},
+		{
+			properties: {
+				username: { type: 'string' },
+				host: {
+					type: 'string',
+					nullable: true,
+					description: 'The local host is represented with `null`.',
+				},
+			},
+			required: ['username'],
+		},
+	],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	let user;
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	const isAdminOrModerator = me && (me.isAdmin || me.isModerator);
+		private userEntityService: UserEntityService,
+		private resolveUserService: ResolveUserService,
+		private apiLoggerService: ApiLoggerService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			let user;
 
-	if (ps.userIds) {
-		if (ps.userIds.length === 0) {
-			return [];
-		}
+			const isAdminOrModerator = me && (me.isAdmin || me.isModerator);
 
-		const users = await Users.find(isAdminOrModerator ? {
-			id: In(ps.userIds),
-		} : {
-			id: In(ps.userIds),
-			isSuspended: false,
-		});
+			if (ps.userIds) {
+				if (ps.userIds.length === 0) {
+					return [];
+				}
 
-		// リクエストされた通りに並べ替え
-		const _users: User[] = [];
-		for (const id of ps.userIds) {
-			_users.push(users.find(x => x.id === id)!);
-		}
+				const users = await this.usersRepository.findBy(isAdminOrModerator ? {
+					id: In(ps.userIds),
+				} : {
+					id: In(ps.userIds),
+					isSuspended: false,
+				});
 
-		return await Promise.all(_users.map(u => Users.pack(u, me, {
-			detail: true,
-		})));
-	} else {
-		// Lookup user
-		if (typeof ps.host === 'string' && typeof ps.username === 'string') {
-			user = await resolveUser(ps.username, ps.host).catch(e => {
-				apiLogger.warn(`failed to resolve remote user: ${e}`);
-				throw new ApiError(meta.errors.failedToResolveRemoteUser);
-			});
-		} else {
-			const q: any = ps.userId != null
-				? { id: ps.userId }
-				: { usernameLower: ps.username!.toLowerCase(), host: null };
+				// リクエストされた通りに並べ替え
+				const _users: User[] = [];
+				for (const id of ps.userIds) {
+					_users.push(users.find(x => x.id === id)!);
+				}
 
-			user = await Users.findOne(q);
-		}
+				return await Promise.all(_users.map(u => this.userEntityService.pack(u, me, {
+					detail: true,
+				})));
+			} else {
+				// Lookup user
+				if (typeof ps.host === 'string' && typeof ps.username === 'string') {
+					user = await this.resolveUserService.resolveUser(ps.username, ps.host).catch(err => {
+						this.apiLoggerService.logger.warn(`failed to resolve remote user: ${err}`);
+						throw new ApiError(meta.errors.failedToResolveRemoteUser);
+					});
+				} else {
+					const q: FindOptionsWhere<User> = ps.userId != null
+						? { id: ps.userId }
+						: { usernameLower: ps.username!.toLowerCase(), host: IsNull() };
 
-		if (user == null || (!isAdminOrModerator && user.isSuspended)) {
-			throw new ApiError(meta.errors.noSuchUser);
-		}
+					user = await this.usersRepository.findOneBy(q);
+				}
 
-		return await Users.pack(user, me, {
-			detail: true,
+				if (user == null || (!isAdminOrModerator && user.isSuspended)) {
+					throw new ApiError(meta.errors.noSuchUser);
+				}
+
+				return await this.userEntityService.pack(user, me, {
+					detail: true,
+				});
+			}
 		});
 	}
-});
+}

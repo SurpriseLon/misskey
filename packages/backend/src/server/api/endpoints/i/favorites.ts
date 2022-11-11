@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { NoteFavorites } from '@/models/index';
-import { makePaginationQuery } from '../../common/make-pagination-query';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { NoteFavoritesRepository } from '@/models/index.js';
+import { QueryService } from '@/core/QueryService.js';
+import { NoteFavoriteEntityService } from '@/core/entities/NoteFavoriteEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['account', 'notes', 'favorites'],
@@ -10,21 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'read:favorites',
-
-	params: {
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-	},
 
 	res: {
 		type: 'array',
@@ -37,15 +23,36 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+	},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const query = makePaginationQuery(NoteFavorites.createQueryBuilder('favorite'), ps.sinceId, ps.untilId)
-		.andWhere(`favorite.userId = :meId`, { meId: user.id })
-		.leftJoinAndSelect('favorite.note', 'note');
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.noteFavoritesRepository)
+		private noteFavoritesRepository: NoteFavoritesRepository,
 
-	const favorites = await query
-		.take(ps.limit!)
-		.getMany();
+		private noteFavoriteEntityService: NoteFavoriteEntityService,
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = this.queryService.makePaginationQuery(this.noteFavoritesRepository.createQueryBuilder('favorite'), ps.sinceId, ps.untilId)
+				.andWhere('favorite.userId = :meId', { meId: me.id })
+				.leftJoinAndSelect('favorite.note', 'note');
 
-	return await NoteFavorites.packMany(favorites, user);
-});
+			const favorites = await query
+				.take(ps.limit)
+				.getMany();
+
+			return await this.noteFavoriteEntityService.packMany(favorites, me);
+		});
+	}
+}

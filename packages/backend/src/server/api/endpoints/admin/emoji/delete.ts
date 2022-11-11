@@ -1,22 +1,16 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { ID } from '@/misc/cafy-id';
-import { Emojis } from '@/models/index';
-import { getConnection } from 'typeorm';
-import { insertModerationLog } from '@/services/insert-moderation-log';
-import { ApiError } from '../../../error';
+import { Inject, Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { EmojisRepository } from '@/models/index.js';
+import { DI } from '@/di-symbols.js';
+import { ModerationLogService } from '@/core/ModerationLogService.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['admin'],
 
 	requireCredential: true,
 	requireModerator: true,
-
-	params: {
-		id: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchEmoji: {
@@ -27,17 +21,40 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		id: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['id'],
+} as const;
+
+// TODO: ロジックをサービスに切り出す
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const emoji = await Emojis.findOne(ps.id);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.db)
+		private db: DataSource,
 
-	if (emoji == null) throw new ApiError(meta.errors.noSuchEmoji);
+		@Inject(DI.emojisRepository)
+		private emojisRepository: EmojisRepository,
 
-	await Emojis.delete(emoji.id);
+		private moderationLogService: ModerationLogService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const emoji = await this.emojisRepository.findOneBy({ id: ps.id });
 
-	await getConnection().queryResultCache!.remove(['meta_emojis']);
+			if (emoji == null) throw new ApiError(meta.errors.noSuchEmoji);
 
-	insertModerationLog(me, 'deleteEmoji', {
-		emoji: emoji,
-	});
-});
+			await this.emojisRepository.delete(emoji.id);
+
+			await this.db.queryResultCache!.remove(['meta_emojis']);
+
+			this.moderationLogService.insertModerationLog(me, 'deleteEmoji', {
+				emoji: emoji,
+			});
+		});
+	}
+}

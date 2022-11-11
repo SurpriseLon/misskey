@@ -1,6 +1,8 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { DriveFiles } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import type { DriveFilesRepository } from '@/models/index.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { DriveFileEntityService } from '@/core/entities/DriveFileEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['drive'],
@@ -9,11 +11,7 @@ export const meta = {
 
 	kind: 'read:drive',
 
-	params: {
-		md5: {
-			validator: $.str,
-		},
-	},
+	description: 'Search for a drive file by a hash of the contents.',
 
 	res: {
 		type: 'array',
@@ -26,12 +24,30 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const files = await DriveFiles.find({
-		md5: ps.md5,
-		userId: user.id,
-	});
+export const paramDef = {
+	type: 'object',
+	properties: {
+		md5: { type: 'string' },
+	},
+	required: ['md5'],
+} as const;
 
-	return await DriveFiles.packMany(files, { self: true });
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
+
+		private driveFileEntityService: DriveFileEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const files = await this.driveFilesRepository.findBy({
+				md5: ps.md5,
+				userId: me.id,
+			});
+
+			return await this.driveFileEntityService.packMany(files, { self: true });
+		});
+	}
+}

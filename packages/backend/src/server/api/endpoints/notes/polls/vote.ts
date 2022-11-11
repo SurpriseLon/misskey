@@ -1,18 +1,17 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import { publishNoteStream } from '@/services/stream';
-import { createNotification } from '@/services/create-notification';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { getNote } from '../../../common/getters';
-import { deliver } from '@/queue/index';
-import { renderActivity } from '@/remote/activitypub/renderer/index';
-import renderVote from '@/remote/activitypub/renderer/vote';
-import { deliverQuestionUpdate } from '@/services/note/polls/update';
-import { PollVotes, NoteWatchings, Users, Polls, Blockings } from '@/models/index';
 import { Not } from 'typeorm';
-import { IRemoteUser } from '@/models/entities/user';
-import { genId } from '@/misc/gen-id';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UsersRepository, BlockingsRepository, PollsRepository, PollVotesRepository } from '@/models/index.js';
+import type { IRemoteUser } from '@/models/entities/User.js';
+import { IdService } from '@/core/IdService.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { GetterService } from '@/server/api/GetterService.js';
+import { QueueService } from '@/core/QueueService.js';
+import { PollService } from '@/core/PollService.js';
+import { ApRendererService } from '@/core/remote/activitypub/ApRendererService.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { CreateNotificationService } from '@/core/CreateNotificationService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['notes'],
@@ -20,16 +19,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:votes',
-
-	params: {
-		noteId: {
-			validator: $.type(ID),
-		},
-
-		choice: {
-			validator: $.num,
-		},
-	},
 
 	errors: {
 		noSuchNote: {
@@ -70,103 +59,125 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		noteId: { type: 'string', format: 'misskey:id' },
+		choice: { type: 'integer' },
+	},
+	required: ['noteId', 'choice'],
+} as const;
+
+// TODO: ロジックをサービスに切り出す
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const createdAt = new Date();
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	// Get votee
-	const note = await getNote(ps.noteId).catch(e => {
-		if (e.id === '9725d0ce-ba28-4dde-95a7-2cbb2c15de24') throw new ApiError(meta.errors.noSuchNote);
-		throw e;
-	});
+		@Inject(DI.blockingsRepository)
+		private blockingsRepository: BlockingsRepository,
 
-	if (!note.hasPoll) {
-		throw new ApiError(meta.errors.noPoll);
-	}
+		@Inject(DI.pollsRepository)
+		private pollsRepository: PollsRepository,
 
-	// Check blocking
-	if (note.userId !== user.id) {
-		const block = await Blockings.findOne({
-			blockerId: note.userId,
-			blockeeId: user.id,
-		});
-		if (block) {
-			throw new ApiError(meta.errors.youHaveBeenBlocked);
-		}
-	}
+		@Inject(DI.pollVotesRepository)
+		private pollVotesRepository: PollVotesRepository,
 
-	const poll = await Polls.findOneOrFail({ noteId: note.id });
+		private idService: IdService,
+		private getterService: GetterService,
+		private queueService: QueueService,
+		private pollService: PollService,
+		private apRendererService: ApRendererService,
+		private globalEventService: GlobalEventService,
+		private createNotificationService: CreateNotificationService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const createdAt = new Date();
 
-	if (poll.expiresAt && poll.expiresAt < createdAt) {
-		throw new ApiError(meta.errors.alreadyExpired);
-	}
+			// Get votee
+			const note = await this.getterService.getNote(ps.noteId).catch(err => {
+				if (err.id === '9725d0ce-ba28-4dde-95a7-2cbb2c15de24') throw new ApiError(meta.errors.noSuchNote);
+				throw err;
+			});
 
-	if (poll.choices[ps.choice] == null) {
-		throw new ApiError(meta.errors.invalidChoice);
-	}
-
-	// if already voted
-	const exist = await PollVotes.find({
-		noteId: note.id,
-		userId: user.id,
-	});
-
-	if (exist.length) {
-		if (poll.multiple) {
-			if (exist.some(x => x.choice == ps.choice)) {
-				throw new ApiError(meta.errors.alreadyVoted);
+			if (!note.hasPoll) {
+				throw new ApiError(meta.errors.noPoll);
 			}
-		} else {
-			throw new ApiError(meta.errors.alreadyVoted);
-		}
-	}
 
-	// Create vote
-	const vote = await PollVotes.insert({
-		id: genId(),
-		createdAt,
-		noteId: note.id,
-		userId: user.id,
-		choice: ps.choice,
-	}).then(x => PollVotes.findOneOrFail(x.identifiers[0]));
+			// Check blocking
+			if (note.userId !== me.id) {
+				const block = await this.blockingsRepository.findOneBy({
+					blockerId: note.userId,
+					blockeeId: me.id,
+				});
+				if (block) {
+					throw new ApiError(meta.errors.youHaveBeenBlocked);
+				}
+			}
 
-	// Increment votes count
-	const index = ps.choice + 1; // In SQL, array index is 1 based
-	await Polls.query(`UPDATE poll SET votes[${index}] = votes[${index}] + 1 WHERE "noteId" = '${poll.noteId}'`);
+			const poll = await this.pollsRepository.findOneByOrFail({ noteId: note.id });
 
-	publishNoteStream(note.id, 'pollVoted', {
-		choice: ps.choice,
-		userId: user.id,
-	});
+			if (poll.expiresAt && poll.expiresAt < createdAt) {
+				throw new ApiError(meta.errors.alreadyExpired);
+			}
 
-	// Notify
-	createNotification(note.userId, 'pollVote', {
-		notifierId: user.id,
-		noteId: note.id,
-		choice: ps.choice,
-	});
+			if (poll.choices[ps.choice] == null) {
+				throw new ApiError(meta.errors.invalidChoice);
+			}
 
-	// Fetch watchers
-	NoteWatchings.find({
-		noteId: note.id,
-		userId: Not(user.id),
-	}).then(watchers => {
-		for (const watcher of watchers) {
-			createNotification(watcher.userId, 'pollVote', {
-				notifierId: user.id,
+			// if already voted
+			const exist = await this.pollVotesRepository.findBy({
+				noteId: note.id,
+				userId: me.id,
+			});
+
+			if (exist.length) {
+				if (poll.multiple) {
+					if (exist.some(x => x.choice === ps.choice)) {
+						throw new ApiError(meta.errors.alreadyVoted);
+					}
+				} else {
+					throw new ApiError(meta.errors.alreadyVoted);
+				}
+			}
+
+			// Create vote
+			const vote = await this.pollVotesRepository.insert({
+				id: this.idService.genId(),
+				createdAt,
+				noteId: note.id,
+				userId: me.id,
+				choice: ps.choice,
+			}).then(x => this.pollVotesRepository.findOneByOrFail(x.identifiers[0]));
+
+			// Increment votes count
+			const index = ps.choice + 1; // In SQL, array index is 1 based
+			await this.pollsRepository.query(`UPDATE poll SET votes[${index}] = votes[${index}] + 1 WHERE "noteId" = '${poll.noteId}'`);
+
+			this.globalEventService.publishNoteStream(note.id, 'pollVoted', {
+				choice: ps.choice,
+				userId: me.id,
+			});
+
+			// Notify
+			this.createNotificationService.createNotification(note.userId, 'pollVote', {
+				notifierId: me.id,
 				noteId: note.id,
 				choice: ps.choice,
 			});
-		}
-	});
 
-	// リモート投票の場合リプライ送信
-	if (note.userHost != null) {
-		const pollOwner = await Users.findOneOrFail(note.userId) as IRemoteUser;
+			// リモート投票の場合リプライ送信
+			if (note.userHost != null) {
+				const pollOwner = await this.usersRepository.findOneByOrFail({ id: note.userId }) as IRemoteUser;
 
-		deliver(user, renderActivity(await renderVote(user, vote, note, poll, pollOwner)), pollOwner.inbox);
+				this.queueService.deliver(me, this.apRendererService.renderActivity(await this.apRendererService.renderVote(me, vote, note, poll, pollOwner)), pollOwner.inbox);
+			}
+
+			// リモートフォロワーにUpdate配信
+			this.pollService.deliverQuestionUpdate(note.id);
+		});
 	}
-
-	// リモートフォロワーにUpdate配信
-	deliverQuestionUpdate(note.id);
-});
+}

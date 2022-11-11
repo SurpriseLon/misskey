@@ -1,10 +1,10 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Channels, ChannelFollowings } from '@/models/index';
-import { genId } from '@/misc/gen-id';
-import { publishUserEvent } from '@/services/stream';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { ChannelFollowingsRepository, ChannelsRepository } from '@/models/index.js';
+import { IdService } from '@/core/IdService.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['channels'],
@@ -12,12 +12,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:channels',
-
-	params: {
-		channelId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchChannel: {
@@ -28,22 +22,44 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		channelId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['channelId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const channel = await Channels.findOne({
-		id: ps.channelId,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.channelsRepository)
+		private channelsRepository: ChannelsRepository,
 
-	if (channel == null) {
-		throw new ApiError(meta.errors.noSuchChannel);
+		@Inject(DI.channelFollowingsRepository)
+		private channelFollowingsRepository: ChannelFollowingsRepository,
+
+		private idService: IdService,
+		private globalEventService: GlobalEventService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const channel = await this.channelsRepository.findOneBy({
+				id: ps.channelId,
+			});
+
+			if (channel == null) {
+				throw new ApiError(meta.errors.noSuchChannel);
+			}
+
+			await this.channelFollowingsRepository.insert({
+				id: this.idService.genId(),
+				createdAt: new Date(),
+				followerId: me.id,
+				followeeId: channel.id,
+			});
+
+			this.globalEventService.publishUserEvent(me.id, 'followChannel', channel);
+		});
 	}
-
-	await ChannelFollowings.insert({
-		id: genId(),
-		createdAt: new Date(),
-		followerId: user.id,
-		followeeId: channel.id,
-	});
-
-	publishUserEvent(user.id, 'followChannel', channel);
-});
+}

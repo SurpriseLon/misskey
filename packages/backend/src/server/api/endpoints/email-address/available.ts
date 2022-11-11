@@ -1,17 +1,11 @@
-import $ from 'cafy';
-import define from '../../define';
-import { validateEmailForAccount } from '@/services/validate-email-for-account';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { EmailService } from '@/core/EmailService.js';
 
 export const meta = {
 	tags: ['users'],
 
 	requireCredential: false,
-
-	params: {
-		emailAddress: {
-			validator: $.str,
-		},
-	},
 
 	res: {
 		type: 'object',
@@ -29,7 +23,22 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		emailAddress: { type: 'string' },
+	},
+	required: ['emailAddress'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps) => {
-	return await validateEmailForAccount(ps.emailAddress);
-});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		private emailService: EmailService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			return await this.emailService.validateEmailForAccount(ps.emailAddress);
+		});
+	}
+}

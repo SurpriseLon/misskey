@@ -1,20 +1,14 @@
-import { URL } from 'url';
-import $ from 'cafy';
-import define from '../../../define';
-import { addRelay } from '@/services/relay';
-import { ApiError } from '../../../error';
+import { URL } from 'node:url';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { RelayService } from '@/core/RelayService.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['admin'],
 
 	requireCredential: true,
 	requireModerator: true,
-
-	params: {
-		inbox: {
-			validator: $.str,
-		},
-	},
 
 	errors: {
 		invalidUrl: {
@@ -52,13 +46,28 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	try {
-		if (new URL(ps.inbox).protocol !== 'https:') throw 'https only';
-	} catch {
-		throw new ApiError(meta.errors.invalidUrl);
-	}
+export const paramDef = {
+	type: 'object',
+	properties: {
+		inbox: { type: 'string' },
+	},
+	required: ['inbox'],
+} as const;
 
-	return await addRelay(ps.inbox);
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		private relayService: RelayService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			try {
+				if (new URL(ps.inbox).protocol !== 'https:') throw 'https only';
+			} catch {
+				throw new ApiError(meta.errors.invalidUrl);
+			}
+
+			return await this.relayService.addRelay(ps.inbox);
+		});
+	}
+}

@@ -1,8 +1,8 @@
-import $ from 'cafy';
-import define from '../../define';
-import Resolver from '@/remote/activitypub/resolver';
-import { ApiError } from '../../error';
+import { Inject, Injectable } from '@nestjs/common';
 import ms from 'ms';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { ApResolverService } from '@/core/remote/activitypub/ApResolverService.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['federation'],
@@ -14,12 +14,6 @@ export const meta = {
 		max: 30,
 	},
 
-	params: {
-		uri: {
-			validator: $.str,
-		},
-	},
-
 	errors: {
 	},
 
@@ -29,9 +23,24 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		uri: { type: 'string' },
+	},
+	required: ['uri'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps) => {
-	const resolver = new Resolver();
-	const object = await resolver.resolve(ps.uri);
-	return object;
-});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		private apResolverService: ApResolverService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const resolver = this.apResolverService.createResolver();
+			const object = await resolver.resolve(ps.uri);
+			return object;
+		});
+	}
+}

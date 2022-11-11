@@ -1,10 +1,11 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import { publishDriveStream } from '@/services/stream';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { DriveFiles, DriveFolders } from '@/models/index';
-import { DB_MAX_IMAGE_COMMENT_LENGTH } from '@/misc/hard-limits';
+import { Inject, Injectable } from '@nestjs/common';
+import type { DriveFilesRepository, DriveFoldersRepository } from '@/models/index.js';
+import { DB_MAX_IMAGE_COMMENT_LENGTH } from '@/misc/hard-limits.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { DriveFileEntityService } from '@/core/entities/DriveFileEntityService.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['drive'],
@@ -13,33 +14,15 @@ export const meta = {
 
 	kind: 'write:drive',
 
-	params: {
-		fileId: {
-			validator: $.type(ID),
-		},
-
-		folderId: {
-			validator: $.optional.nullable.type(ID),
-			default: undefined as any,
-		},
-
-		name: {
-			validator: $.optional.str.pipe(DriveFiles.validateFileName),
-			default: undefined as any,
-		},
-
-		isSensitive: {
-			validator: $.optional.bool,
-			default: undefined as any,
-		},
-
-		comment: {
-			validator: $.optional.nullable.str.max(DB_MAX_IMAGE_COMMENT_LENGTH),
-			default: undefined as any,
-		},
-	},
+	description: 'Update the properties of a drive file.',
 
 	errors: {
+		invalidFileName: {
+			message: 'Invalid file name.',
+			code: 'INVALID_FILE_NAME',
+			id: '395e7156-f9f0-475e-af89-53c3c23080c2',
+		},
+
 		noSuchFile: {
 			message: 'No such file.',
 			code: 'NO_SUCH_FILE',
@@ -66,52 +49,81 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		fileId: { type: 'string', format: 'misskey:id' },
+		folderId: { type: 'string', format: 'misskey:id', nullable: true },
+		name: { type: 'string' },
+		isSensitive: { type: 'boolean' },
+		comment: { type: 'string', nullable: true, maxLength: 512 },
+	},
+	required: ['fileId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const file = await DriveFiles.findOne(ps.fileId);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
 
-	if (file == null) {
-		throw new ApiError(meta.errors.noSuchFile);
-	}
+		@Inject(DI.driveFoldersRepository)
+		private driveFoldersRepository: DriveFoldersRepository,
 
-	if (!user.isAdmin && !user.isModerator && (file.userId !== user.id)) {
-		throw new ApiError(meta.errors.accessDenied);
-	}
+		private driveFileEntityService: DriveFileEntityService,
+		private globalEventService: GlobalEventService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const file = await this.driveFilesRepository.findOneBy({ id: ps.fileId });
 
-	if (ps.name) file.name = ps.name;
-
-	if (ps.comment !== undefined) file.comment = ps.comment;
-
-	if (ps.isSensitive !== undefined) file.isSensitive = ps.isSensitive;
-
-	if (ps.folderId !== undefined) {
-		if (ps.folderId === null) {
-			file.folderId = null;
-		} else {
-			const folder = await DriveFolders.findOne({
-				id: ps.folderId,
-				userId: user.id,
-			});
-
-			if (folder == null) {
-				throw new ApiError(meta.errors.noSuchFolder);
+			if (file == null) {
+				throw new ApiError(meta.errors.noSuchFile);
 			}
 
-			file.folderId = folder.id;
-		}
+			if ((!me.isAdmin && !me.isModerator) && (file.userId !== me.id)) {
+				throw new ApiError(meta.errors.accessDenied);
+			}
+
+			if (ps.name) file.name = ps.name;
+			if (!this.driveFileEntityService.validateFileName(file.name)) {
+				throw new ApiError(meta.errors.invalidFileName);
+			}
+
+			if (ps.comment !== undefined) file.comment = ps.comment;
+
+			if (ps.isSensitive !== undefined) file.isSensitive = ps.isSensitive;
+
+			if (ps.folderId !== undefined) {
+				if (ps.folderId === null) {
+					file.folderId = null;
+				} else {
+					const folder = await this.driveFoldersRepository.findOneBy({
+						id: ps.folderId,
+						userId: me.id,
+					});
+
+					if (folder == null) {
+						throw new ApiError(meta.errors.noSuchFolder);
+					}
+
+					file.folderId = folder.id;
+				}
+			}
+
+			await this.driveFilesRepository.update(file.id, {
+				name: file.name,
+				comment: file.comment,
+				folderId: file.folderId,
+				isSensitive: file.isSensitive,
+			});
+
+			const fileObj = await this.driveFileEntityService.pack(file, { self: true });
+
+			// Publish fileUpdated event
+			this.globalEventService.publishDriveStream(me.id, 'fileUpdated', fileObj);
+
+			return fileObj;
+		});
 	}
-
-	await DriveFiles.update(file.id, {
-		name: file.name,
-		comment: file.comment,
-		folderId: file.folderId,
-		isSensitive: file.isSensitive,
-	});
-
-	const fileObj = await DriveFiles.pack(file, { self: true });
-
-	// Publish fileUpdated event
-	publishDriveStream(user.id, 'fileUpdated', fileObj);
-
-	return fileObj;
-});
+}

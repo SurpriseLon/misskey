@@ -1,6 +1,7 @@
-import define from '../../define';
-import { createExportMuteJob } from '@/queue/index';
+import { Inject, Injectable } from '@nestjs/common';
 import ms from 'ms';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { QueueService } from '@/core/QueueService.js';
 
 export const meta = {
 	secure: true,
@@ -11,7 +12,20 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	createExportMuteJob(user);
-});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		private queueService: QueueService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			this.queueService.createExportMuteJob(me);
+		});
+	}
+}

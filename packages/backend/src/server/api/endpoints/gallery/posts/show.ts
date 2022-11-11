@@ -1,19 +1,14 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../../define';
-import { ApiError } from '../../../error';
-import { GalleryPosts } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { GalleryPostsRepository } from '@/models/index.js';
+import { GalleryPostEntityService } from '@/core/entities/GalleryPostEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['gallery'],
 
 	requireCredential: false,
-
-	params: {
-		postId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchPost: {
@@ -30,15 +25,33 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		postId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['postId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const post = await GalleryPosts.findOne({
-		id: ps.postId,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.galleryPostsRepository)
+		private galleryPostsRepository: GalleryPostsRepository,
 
-	if (post == null) {
-		throw new ApiError(meta.errors.noSuchPost);
+		private galleryPostEntityService: GalleryPostEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const post = await this.galleryPostsRepository.findOneBy({
+				id: ps.postId,
+			});
+
+			if (post == null) {
+				throw new ApiError(meta.errors.noSuchPost);
+			}
+
+			return await this.galleryPostEntityService.pack(post, me);
+		});
 	}
-
-	return await GalleryPosts.pack(post, me);
-});
+}

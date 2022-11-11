@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { UserGroupInvitations } from '@/models/index';
-import { makePaginationQuery } from '../../common/make-pagination-query';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { UserGroupInvitationsRepository } from '@/models/index.js';
+import { QueryService } from '@/core/QueryService.js';
+import { UserGroupInvitationEntityService } from '@/core/entities/UserGroupInvitationEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['account', 'groups'],
@@ -10,21 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'read:user-groups',
-
-	params: {
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-	},
 
 	res: {
 		type: 'array',
@@ -48,15 +34,36 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+	},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const query = makePaginationQuery(UserGroupInvitations.createQueryBuilder('invitation'), ps.sinceId, ps.untilId)
-		.andWhere(`invitation.userId = :meId`, { meId: user.id })
-		.leftJoinAndSelect('invitation.userGroup', 'user_group');
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.userGroupInvitationsRepository)
+		private userGroupInvitationsRepository: UserGroupInvitationsRepository,
 
-	const invitations = await query
-		.take(ps.limit!)
-		.getMany();
+		private userGroupInvitationEntityService: UserGroupInvitationEntityService,
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = this.queryService.makePaginationQuery(this.userGroupInvitationsRepository.createQueryBuilder('invitation'), ps.sinceId, ps.untilId)
+				.andWhere('invitation.userId = :meId', { meId: me.id })
+				.leftJoinAndSelect('invitation.userGroup', 'user_group');
 
-	return await UserGroupInvitations.packMany(invitations);
-});
+			const invitations = await query
+				.take(ps.limit)
+				.getMany();
+
+			return await this.userGroupInvitationEntityService.packMany(invitations);
+		});
+	}
+}

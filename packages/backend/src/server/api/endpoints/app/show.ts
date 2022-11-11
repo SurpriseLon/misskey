@@ -1,17 +1,12 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Apps } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { AppsRepository } from '@/models/index.js';
+import { AppEntityService } from '@/core/entities/AppEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['app'],
-
-	params: {
-		appId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchApp: {
@@ -28,19 +23,37 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		appId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['appId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user, token) => {
-	const isSecure = user != null && token == null;
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.appsRepository)
+		private appsRepository: AppsRepository,
 
-	// Lookup app
-	const ap = await Apps.findOne(ps.appId);
+		private appEntityService: AppEntityService,
+	) {
+		super(meta, paramDef, async (ps, user, token) => {
+			const isSecure = user != null && token == null;
 
-	if (ap == null) {
-		throw new ApiError(meta.errors.noSuchApp);
+			// Lookup app
+			const ap = await this.appsRepository.findOneBy({ id: ps.appId });
+
+			if (ap == null) {
+				throw new ApiError(meta.errors.noSuchApp);
+			}
+
+			return await this.appEntityService.pack(ap, user, {
+				detail: true,
+				includeSecret: isSecure && (ap.userId === user!.id),
+			});
+		});
 	}
-
-	return await Apps.pack(ap, user, {
-		detail: true,
-		includeSecret: isSecure && (ap.userId === user!.id),
-	});
-});
+}

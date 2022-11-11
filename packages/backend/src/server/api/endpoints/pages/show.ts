@@ -1,28 +1,16 @@
-import $ from 'cafy';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Pages, Users } from '@/models/index';
-import { ID } from '@/misc/cafy-id';
-import { Page } from '@/models/entities/page';
+import { IsNull } from 'typeorm';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UsersRepository, PagesRepository } from '@/models/index.js';
+import type { Page } from '@/models/entities/Page.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { PageEntityService } from '@/core/entities/PageEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['pages'],
 
 	requireCredential: false,
-
-	params: {
-		pageId: {
-			validator: $.optional.type(ID),
-		},
-
-		name: {
-			validator: $.optional.str,
-		},
-
-		username: {
-			validator: $.optional.str,
-		},
-	},
 
 	res: {
 		type: 'object',
@@ -39,28 +27,60 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	anyOf: [
+		{
+			properties: {
+				pageId: { type: 'string', format: 'misskey:id' },
+			},
+			required: ['pageId'],
+		},
+		{
+			properties: {
+				name: { type: 'string' },
+				username: { type: 'string' },
+			},
+			required: ['name', 'username'],
+		},
+	],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	let page: Page | undefined;
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.usersRepository)
+		private usersRepository: UsersRepository,
 
-	if (ps.pageId) {
-		page = await Pages.findOne(ps.pageId);
-	} else if (ps.name && ps.username) {
-		const author = await Users.findOne({
-			host: null,
-			usernameLower: ps.username.toLowerCase(),
+		@Inject(DI.pagesRepository)
+		private pagesRepository: PagesRepository,
+
+		private pageEntityService: PageEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			let page: Page | null = null;
+
+			if (ps.pageId) {
+				page = await this.pagesRepository.findOneBy({ id: ps.pageId });
+			} else if (ps.name && ps.username) {
+				const author = await this.usersRepository.findOneBy({
+					host: IsNull(),
+					usernameLower: ps.username.toLowerCase(),
+				});
+				if (author) {
+					page = await this.pagesRepository.findOneBy({
+						name: ps.name,
+						userId: author.id,
+					});
+				}
+			}
+
+			if (page == null) {
+				throw new ApiError(meta.errors.noSuchPage);
+			}
+
+			return await this.pageEntityService.pack(page, me);
 		});
-		if (author) {
-			page = await Pages.findOne({
-				name: ps.name,
-				userId: author.id,
-			});
-		}
 	}
-
-	if (page == null) {
-		throw new ApiError(meta.errors.noSuchPage);
-	}
-
-	return await Pages.pack(page, user);
-});
+}

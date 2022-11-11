@@ -1,10 +1,11 @@
-import $ from 'cafy';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Channels, DriveFiles } from '@/models/index';
-import { Channel } from '@/models/entities/channel';
-import { genId } from '@/misc/gen-id';
-import { ID } from '@/misc/cafy-id';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { ChannelsRepository, DriveFilesRepository } from '@/models/index.js';
+import type { Channel } from '@/models/entities/Channel.js';
+import { IdService } from '@/core/IdService.js';
+import { ChannelEntityService } from '@/core/entities/ChannelEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['channels'],
@@ -12,20 +13,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:channels',
-
-	params: {
-		name: {
-			validator: $.str.range(1, 128),
-		},
-
-		description: {
-			validator: $.nullable.optional.str.range(1, 2048),
-		},
-
-		bannerId: {
-			validator: $.nullable.optional.type(ID),
-		},
-	},
 
 	res: {
 		type: 'object',
@@ -42,28 +29,52 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		name: { type: 'string', minLength: 1, maxLength: 128 },
+		description: { type: 'string', nullable: true, minLength: 1, maxLength: 2048 },
+		bannerId: { type: 'string', format: 'misskey:id', nullable: true },
+	},
+	required: ['name'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	let banner = null;
-	if (ps.bannerId != null) {
-		banner = await DriveFiles.findOne({
-			id: ps.bannerId,
-			userId: user.id,
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
+
+		@Inject(DI.channelsRepository)
+		private channelsRepository: ChannelsRepository,
+
+		private idService: IdService,
+		private channelEntityService: ChannelEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			let banner = null;
+			if (ps.bannerId != null) {
+				banner = await this.driveFilesRepository.findOneBy({
+					id: ps.bannerId,
+					userId: me.id,
+				});
+
+				if (banner == null) {
+					throw new ApiError(meta.errors.noSuchFile);
+				}
+			}
+
+			const channel = await this.channelsRepository.insert({
+				id: this.idService.genId(),
+				createdAt: new Date(),
+				userId: me.id,
+				name: ps.name,
+				description: ps.description ?? null,
+				bannerId: banner ? banner.id : null,
+			} as Channel).then(x => this.channelsRepository.findOneByOrFail(x.identifiers[0]));
+
+			return await this.channelEntityService.pack(channel, me);
 		});
-
-		if (banner == null) {
-			throw new ApiError(meta.errors.noSuchFile);
-		}
 	}
-
-	const channel = await Channels.insert({
-		id: genId(),
-		createdAt: new Date(),
-		userId: user.id,
-		name: ps.name,
-		description: ps.description || null,
-		bannerId: banner ? banner.id : null,
-	} as Channel).then(x => Channels.findOneOrFail(x.identifiers[0]));
-
-	return await Channels.pack(channel, user);
-});
+}

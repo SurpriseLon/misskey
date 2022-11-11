@@ -1,27 +1,35 @@
-import $ from 'cafy';
-import define from '../define';
-import endpoints from '../endpoints';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import endpoints from '../endpoints.js';
 
 export const meta = {
 	requireCredential: false,
 
 	tags: ['meta'],
+} as const;
 
-	params: {
-		endpoint: {
-			validator: $.str,
-		},
+export const paramDef = {
+	type: 'object',
+	properties: {
+		endpoint: { type: 'string' },
 	},
+	required: ['endpoint'],
 } as const;
 
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps) => {
-	const ep = endpoints.find(x => x.name === ps.endpoint);
-	if (ep == null) return null;
-	return {
-		params: Object.entries(ep.meta.params || {}).map(([k, v]) => ({
-			name: k,
-			type: v.validator.name === 'ID' ? 'String' : v.validator.name,
-		})),
-	};
-});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+	) {
+		super(meta, paramDef, async (ps) => {
+			const ep = endpoints.find(x => x.name === ps.endpoint);
+			if (ep == null) return null;
+			return {
+				params: Object.entries(ep.params.properties ?? {}).map(([k, v]) => ({
+					name: k,
+					type: v.type.charAt(0).toUpperCase() + v.type.slice(1),
+				})),
+			};
+		});
+	}
+}

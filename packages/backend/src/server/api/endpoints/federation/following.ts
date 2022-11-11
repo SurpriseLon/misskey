@@ -1,32 +1,14 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { Followings } from '@/models/index';
-import { makePaginationQuery } from '../../common/make-pagination-query';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { FollowingsRepository } from '@/models/index.js';
+import { QueryService } from '@/core/QueryService.js';
+import { FollowingEntityService } from '@/core/entities/FollowingEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['federation'],
 
 	requireCredential: false,
-
-	params: {
-		host: {
-			validator: $.str,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-	},
 
 	res: {
 		type: 'array',
@@ -39,14 +21,36 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		host: { type: 'string' },
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+	},
+	required: ['host'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const query = makePaginationQuery(Followings.createQueryBuilder('following'), ps.sinceId, ps.untilId)
-		.andWhere(`following.followerHost = :host`, { host: ps.host });
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.followingsRepository)
+		private followingsRepository: FollowingsRepository,
 
-	const followings = await query
-		.take(ps.limit!)
-		.getMany();
+		private followingEntityService: FollowingEntityService,
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = this.queryService.makePaginationQuery(this.followingsRepository.createQueryBuilder('following'), ps.sinceId, ps.untilId)
+				.andWhere('following.followerHost = :host', { host: ps.host });
 
-	return await Followings.packMany(followings, me, { populateFollowee: true });
-});
+			const followings = await query
+				.take(ps.limit)
+				.getMany();
+
+			return await this.followingEntityService.packMany(followings, me, { populateFollowee: true });
+		});
+	}
+}

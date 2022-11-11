@@ -1,295 +1,251 @@
 <template>
-<MkSpacer :content-max="900" :margin-min="20" :margin-max="32">
-	<div ref="el" class="vvcocwet" :class="{ wide: !narrow }">
-		<div class="header">
-			<div class="title">{{ $ts.settings }}</div>
-			<div v-if="childInfo" class="subtitle">{{ childInfo.title }}</div>
-		</div>
-		<div class="body">
-			<div v-if="!narrow || page == null" class="nav">
-				<div class="baaadecd">
-					<MkInfo v-if="emailNotConfigured" warn class="info">{{ $ts.emailNotConfiguredWarning }} <MkA to="/settings/email" class="_link">{{ $ts.configure }}</MkA></MkInfo>
-					<MkSuperMenu :def="menuDef" :grid="page == null"></MkSuperMenu>
+<MkStickyContainer>
+	<template #header><MkPageHeader :actions="headerActions" :tabs="headerTabs"/></template>
+	<MkSpacer :content-max="900" :margin-min="20" :margin-max="32">
+		<div ref="el" class="vvcocwet" :class="{ wide: !narrow }">
+			<div class="body">
+				<div v-if="!narrow || currentPage?.route.name == null" class="nav">
+					<div class="baaadecd">
+						<MkInfo v-if="emailNotConfigured" warn class="info">{{ i18n.ts.emailNotConfiguredWarning }} <MkA to="/settings/email" class="_link">{{ i18n.ts.configure }}</MkA></MkInfo>
+						<MkSuperMenu :def="menuDef" :grid="currentPage?.route.name == null"></MkSuperMenu>
+					</div>
+				</div>
+				<div v-if="!(narrow && currentPage?.route.name == null)" class="main">
+					<div class="bkzroven">
+						<RouterView/>
+					</div>
 				</div>
 			</div>
-			<div class="main">
-				<div class="bkzroven">
-					<component :is="component" :ref="el => pageChanged(el)" :key="page" v-bind="pageProps"/>
-				</div>
-			</div>
 		</div>
-	</div>
-</MkSpacer>
+	</MkSpacer>
+</mkstickycontainer>
 </template>
 
-<script lang="ts">
-import { computed, defineAsyncComponent, defineComponent, nextTick, onMounted, reactive, ref, watch } from 'vue';
+<script setup lang="ts">
+import { computed, defineAsyncComponent, inject, nextTick, onActivated, onMounted, onUnmounted, provide, ref, watch } from 'vue';
 import { i18n } from '@/i18n';
-import MkInfo from '@/components/ui/info.vue';
-import MkSuperMenu from '@/components/ui/super-menu.vue';
+import MkInfo from '@/components/MkInfo.vue';
+import MkSuperMenu from '@/components/MkSuperMenu.vue';
 import { scroll } from '@/scripts/scroll';
-import { signout } from '@/account';
+import { signout , $i } from '@/account';
 import { unisonReload } from '@/scripts/unison-reload';
-import * as symbols from '@/symbols';
 import { instance } from '@/instance';
-import { $i } from '@/account';
+import { useRouter } from '@/router';
+import { definePageMetadata, provideMetadataReceiver, setPageMetadata } from '@/scripts/page-metadata';
+import * as os from '@/os';
 
-export default defineComponent({
-	components: {
-		MkInfo,
-		MkSuperMenu,
-	},
+const indexInfo = {
+	title: i18n.ts.settings,
+	icon: 'fas fa-cog',
+	hideHeader: true,
+};
+const INFO = ref(indexInfo);
+const el = ref<HTMLElement | null>(null);
+const childInfo = ref(null);
 
-	props: {
-		initialPage: {
-			type: String,
-			required: false
-		}
-	},
+const router = useRouter();
 
-	setup(props, context) {
-		const indexInfo = {
-			title: i18n.ts.settings,
-			icon: 'fas fa-cog',
-			bg: 'var(--bg)',
-			hideHeader: true,
-		};
-		const INFO = ref(indexInfo);
-		const page = ref(props.initialPage);
-		const narrow = ref(false);
-		const view = ref(null);
-		const el = ref(null);
-		const childInfo = ref(null);
-		const menuDef = computed(() => [{
-			title: i18n.ts.basicSettings,
-			items: [{
-				icon: 'fas fa-user',
-				text: i18n.ts.profile,
-				to: '/settings/profile',
-				active: page.value === 'profile',
-			}, {
-				icon: 'fas fa-lock-open',
-				text: i18n.ts.privacy,
-				to: '/settings/privacy',
-				active: page.value === 'privacy',
-			}, {
-				icon: 'fas fa-laugh',
-				text: i18n.ts.reaction,
-				to: '/settings/reaction',
-				active: page.value === 'reaction',
-			}, {
-				icon: 'fas fa-cloud',
-				text: i18n.ts.drive,
-				to: '/settings/drive',
-				active: page.value === 'drive',
-			}, {
-				icon: 'fas fa-bell',
-				text: i18n.ts.notifications,
-				to: '/settings/notifications',
-				active: page.value === 'notifications',
-			}, {
-				icon: 'fas fa-envelope',
-				text: i18n.ts.email,
-				to: '/settings/email',
-				active: page.value === 'email',
-			}, {
-				icon: 'fas fa-share-alt',
-				text: i18n.ts.integration,
-				to: '/settings/integration',
-				active: page.value === 'integration',
-			}, {
-				icon: 'fas fa-lock',
-				text: i18n.ts.security,
-				to: '/settings/security',
-				active: page.value === 'security',
-			}],
-		}, {
-			title: i18n.ts.clientSettings,
-			items: [{
-				icon: 'fas fa-cogs',
-				text: i18n.ts.general,
-				to: '/settings/general',
-				active: page.value === 'general',
-			}, {
-				icon: 'fas fa-palette',
-				text: i18n.ts.theme,
-				to: '/settings/theme',
-				active: page.value === 'theme',
-			}, {
-				icon: 'fas fa-list-ul',
-				text: i18n.ts.menu,
-				to: '/settings/menu',
-				active: page.value === 'menu',
-			}, {
-				icon: 'fas fa-music',
-				text: i18n.ts.sounds,
-				to: '/settings/sounds',
-				active: page.value === 'sounds',
-			}, {
-				icon: 'fas fa-plug',
-				text: i18n.ts.plugins,
-				to: '/settings/plugin',
-				active: page.value === 'plugin',
-			}],
-		}, {
-			title: i18n.ts.otherSettings,
-			items: [{
-				icon: 'fas fa-boxes',
-				text: i18n.ts.importAndExport,
-				to: '/settings/import-export',
-				active: page.value === 'import-export',
-			}, {
-				icon: 'fas fa-volume-mute',
-				text: i18n.ts.instanceMute,
-				to: '/settings/instance-mute',
-				active: page.value === 'instance-mute',
-			}, {
-				icon: 'fas fa-ban',
-				text: i18n.ts.muteAndBlock,
-				to: '/settings/mute-block',
-				active: page.value === 'mute-block',
-			}, {
-				icon: 'fas fa-comment-slash',
-				text: i18n.ts.wordMute,
-				to: '/settings/word-mute',
-				active: page.value === 'word-mute',
-			}, {
-				icon: 'fas fa-key',
-				text: 'API',
-				to: '/settings/api',
-				active: page.value === 'api',
-			}, {
-				icon: 'fas fa-ellipsis-h',
-				text: i18n.ts.other,
-				to: '/settings/other',
-				active: page.value === 'other',
-			}],
-		}, {
-			items: [{
-				type: 'button',
-				icon: 'fas fa-trash',
-				text: i18n.ts.clearCache,
-				action: () => {
-					localStorage.removeItem('locale');
-					localStorage.removeItem('theme');
-					unisonReload();
-				},
-			}, {
-				type: 'button',
-				icon: 'fas fa-sign-in-alt fa-flip-horizontal',
-				text: i18n.ts.logout,
-				action: () => {
-					signout();
-				},
-				danger: true,
-			},],
-		}]);
+let narrow = $ref(false);
+const NARROW_THRESHOLD = 600;
 
-		const pageProps = ref({});
-		const component = computed(() => {
-			if (page.value == null) return null;
-			switch (page.value) {
-				case 'accounts': return defineAsyncComponent(() => import('./accounts.vue'));
-				case 'profile': return defineAsyncComponent(() => import('./profile.vue'));
-				case 'privacy': return defineAsyncComponent(() => import('./privacy.vue'));
-				case 'reaction': return defineAsyncComponent(() => import('./reaction.vue'));
-				case 'drive': return defineAsyncComponent(() => import('./drive.vue'));
-				case 'notifications': return defineAsyncComponent(() => import('./notifications.vue'));
-				case 'mute-block': return defineAsyncComponent(() => import('./mute-block.vue'));
-				case 'word-mute': return defineAsyncComponent(() => import('./word-mute.vue'));
-				case 'instance-mute': return defineAsyncComponent(() => import('./instance-mute.vue'));
-				case 'integration': return defineAsyncComponent(() => import('./integration.vue'));
-				case 'security': return defineAsyncComponent(() => import('./security.vue'));
-				case '2fa': return defineAsyncComponent(() => import('./2fa.vue'));
-				case 'api': return defineAsyncComponent(() => import('./api.vue'));
-				case 'apps': return defineAsyncComponent(() => import('./apps.vue'));
-				case 'other': return defineAsyncComponent(() => import('./other.vue'));
-				case 'general': return defineAsyncComponent(() => import('./general.vue'));
-				case 'email': return defineAsyncComponent(() => import('./email.vue'));
-				case 'theme': return defineAsyncComponent(() => import('./theme.vue'));
-				case 'theme/install': return defineAsyncComponent(() => import('./theme.install.vue'));
-				case 'theme/manage': return defineAsyncComponent(() => import('./theme.manage.vue'));
-				case 'menu': return defineAsyncComponent(() => import('./menu.vue'));
-				case 'sounds': return defineAsyncComponent(() => import('./sounds.vue'));
-				case 'custom-css': return defineAsyncComponent(() => import('./custom-css.vue'));
-				case 'deck': return defineAsyncComponent(() => import('./deck.vue'));
-				case 'plugin': return defineAsyncComponent(() => import('./plugin.vue'));
-				case 'plugin/install': return defineAsyncComponent(() => import('./plugin.install.vue'));
-				case 'import-export': return defineAsyncComponent(() => import('./import-export.vue'));
-				case 'account-info': return defineAsyncComponent(() => import('./account-info.vue'));
-				case 'delete-account': return defineAsyncComponent(() => import('./delete-account.vue'));
-			}
-			return null;
-		});
+let currentPage = $computed(() => router.currentRef.value.child);
 
-		watch(component, () => {
-			pageProps.value = {};
-
-			nextTick(() => {
-				scroll(el.value, { top: 0 });
-			});
-		}, { immediate: true });
-
-		watch(() => props.initialPage, () => {
-			if (props.initialPage == null && !narrow.value) {
-				page.value = 'profile';
-			} else {
-				page.value = props.initialPage;
-				if (props.initialPage == null) {
-					INFO.value = indexInfo;
-				}
-			}
-		});
-
-		onMounted(() => {
-			narrow.value = el.value.offsetWidth < 800;
-			if (!narrow.value) {
-				page.value = 'profile';
-			}
-		});
-
-		const emailNotConfigured = computed(() => instance.enableEmail && ($i.email == null || !$i.emailVerified));
-
-		const pageChanged = (page) => {
-			if (page == null) return;
-			childInfo.value = page[symbols.PAGE_INFO];
-		};
-
-		return {
-			[symbols.PAGE_INFO]: INFO,
-			page,
-			menuDef,
-			narrow,
-			view,
-			el,
-			pageProps,
-			component,
-			emailNotConfigured,
-			pageChanged,
-			childInfo,
-		};
-	},
+const ro = new ResizeObserver((entries, observer) => {
+	if (entries.length === 0) return;
+	narrow = entries[0].borderBoxSize[0].inlineSize < NARROW_THRESHOLD;
 });
+
+const menuDef = computed(() => [{
+	title: i18n.ts.basicSettings,
+	items: [{
+		icon: 'fas fa-user',
+		text: i18n.ts.profile,
+		to: '/settings/profile',
+		active: currentPage?.route.name === 'profile',
+	}, {
+		icon: 'fas fa-lock-open',
+		text: i18n.ts.privacy,
+		to: '/settings/privacy',
+		active: currentPage?.route.name === 'privacy',
+	}, {
+		icon: 'fas fa-laugh',
+		text: i18n.ts.reaction,
+		to: '/settings/reaction',
+		active: currentPage?.route.name === 'reaction',
+	}, {
+		icon: 'fas fa-cloud',
+		text: i18n.ts.drive,
+		to: '/settings/drive',
+		active: currentPage?.route.name === 'drive',
+	}, {
+		icon: 'fas fa-bell',
+		text: i18n.ts.notifications,
+		to: '/settings/notifications',
+		active: currentPage?.route.name === 'notifications',
+	}, {
+		icon: 'fas fa-envelope',
+		text: i18n.ts.email,
+		to: '/settings/email',
+		active: currentPage?.route.name === 'email',
+	}, {
+		icon: 'fas fa-share-alt',
+		text: i18n.ts.integration,
+		to: '/settings/integration',
+		active: currentPage?.route.name === 'integration',
+	}, {
+		icon: 'fas fa-lock',
+		text: i18n.ts.security,
+		to: '/settings/security',
+		active: currentPage?.route.name === 'security',
+	}],
+}, {
+	title: i18n.ts.clientSettings,
+	items: [{
+		icon: 'fas fa-cogs',
+		text: i18n.ts.general,
+		to: '/settings/general',
+		active: currentPage?.route.name === 'general',
+	}, {
+		icon: 'fas fa-palette',
+		text: i18n.ts.theme,
+		to: '/settings/theme',
+		active: currentPage?.route.name === 'theme',
+	}, {
+		icon: 'fas fa-bars',
+		text: i18n.ts.navbar,
+		to: '/settings/navbar',
+		active: currentPage?.route.name === 'navbar',
+	}, {
+		icon: 'fas fa-bars-progress',
+		text: i18n.ts.statusbar,
+		to: '/settings/statusbar',
+		active: currentPage?.route.name === 'statusbar',
+	}, {
+		icon: 'fas fa-music',
+		text: i18n.ts.sounds,
+		to: '/settings/sounds',
+		active: currentPage?.route.name === 'sounds',
+	}, {
+		icon: 'fas fa-plug',
+		text: i18n.ts.plugins,
+		to: '/settings/plugin',
+		active: currentPage?.route.name === 'plugin',
+	}],
+}, {
+	title: i18n.ts.otherSettings,
+	items: [{
+		icon: 'fas fa-boxes',
+		text: i18n.ts.importAndExport,
+		to: '/settings/import-export',
+		active: currentPage?.route.name === 'import-export',
+	}, {
+		icon: 'fas fa-volume-mute',
+		text: i18n.ts.instanceMute,
+		to: '/settings/instance-mute',
+		active: currentPage?.route.name === 'instance-mute',
+	}, {
+		icon: 'fas fa-ban',
+		text: i18n.ts.muteAndBlock,
+		to: '/settings/mute-block',
+		active: currentPage?.route.name === 'mute-block',
+	}, {
+		icon: 'fas fa-comment-slash',
+		text: i18n.ts.wordMute,
+		to: '/settings/word-mute',
+		active: currentPage?.route.name === 'word-mute',
+	}, {
+		icon: 'fas fa-key',
+		text: 'API',
+		to: '/settings/api',
+		active: currentPage?.route.name === 'api',
+	}, {
+		icon: 'fas fa-bolt',
+		text: 'Webhook',
+		to: '/settings/webhook',
+		active: currentPage?.route.name === 'webhook',
+	}, {
+		icon: 'fas fa-ellipsis-h',
+		text: i18n.ts.other,
+		to: '/settings/other',
+		active: currentPage?.route.name === 'other',
+	}],
+}, {
+	items: [{
+		icon: 'fas fa-floppy-disk',
+		text: i18n.ts.preferencesBackups,
+		to: '/settings/preferences-backups',
+		active: currentPage?.route.name === 'preferences-backups',
+	}, {
+		type: 'button',
+		icon: 'fas fa-trash',
+		text: i18n.ts.clearCache,
+		action: () => {
+			localStorage.removeItem('locale');
+			localStorage.removeItem('theme');
+			unisonReload();
+		},
+	}, {
+		type: 'button',
+		icon: 'fas fa-sign-in-alt fa-flip-horizontal',
+		text: i18n.ts.logout,
+		action: async () => {
+			const { canceled } = await os.confirm({
+				type: 'warning',
+				text: i18n.ts.logoutConfirm,
+			});
+			if (canceled) return;
+			signout();
+		},
+		danger: true,
+	}],
+}]);
+
+watch($$(narrow), () => {
+});
+
+onMounted(() => {
+	ro.observe(el.value);
+
+	narrow = el.value.offsetWidth < NARROW_THRESHOLD;
+
+	if (!narrow && currentPage?.route.name == null) {
+		router.replace('/settings/profile');
+	}
+});
+
+onActivated(() => {
+	narrow = el.value.offsetWidth < NARROW_THRESHOLD;
+
+	if (!narrow && currentPage?.route.name == null) {
+		router.replace('/settings/profile');
+	}
+});
+
+onUnmounted(() => {
+	ro.disconnect();
+});
+
+const emailNotConfigured = computed(() => instance.enableEmail && ($i.email == null || !$i.emailVerified));
+
+provideMetadataReceiver((info) => {
+	if (info == null) {
+		childInfo.value = null;
+	} else {
+		childInfo.value = info;
+	}
+});
+
+const headerActions = $computed(() => []);
+
+const headerTabs = $computed(() => []);
+
+definePageMetadata(INFO);
+// w 890
+// h 700
 </script>
 
 <style lang="scss" scoped>
 .vvcocwet {
-	> .header {
-		display: flex;
-		margin-bottom: 24px;
-		font-size: 1.3em;
-		font-weight: bold;
-
-		> .title {
-			width: 34%;
-		}
-
-		> .subtitle {
-			flex: 1;
-			min-width: 0;
-		}
-	}
-
 	> .body {
 		> .nav {
 			.baaadecd {
@@ -323,13 +279,11 @@ export default defineComponent({
 				width: 34%;
 				padding-right: 32px;
 				box-sizing: border-box;
-				overflow: auto;
 			}
 
 			> .main {
 				flex: 1;
 				min-width: 0;
-				overflow: auto;
 			}
 		}
 	}

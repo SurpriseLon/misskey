@@ -1,44 +1,20 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { getNote } from '../../common/getters';
-import { ApiError } from '../../error';
-import { NoteReactions } from '@/models/index';
 import { DeepPartial } from 'typeorm';
-import { NoteReaction } from '@/models/entities/note-reaction';
+import { Inject, Injectable } from '@nestjs/common';
+import type { NoteReactionsRepository } from '@/models/index.js';
+import type { NoteReaction } from '@/models/entities/NoteReaction.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { NoteReactionEntityService } from '@/core/entities/NoteReactionEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
+import type { FindOptionsWhere } from 'typeorm';
 
 export const meta = {
 	tags: ['notes', 'reactions'],
 
 	requireCredential: false,
 
-	params: {
-		noteId: {
-			validator: $.type(ID),
-		},
-
-		type: {
-			validator: $.optional.nullable.str,
-		},
-
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-
-		offset: {
-			validator: $.optional.num,
-			default: 0,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-	},
+	allowGet: true,
+	cacheSec: 60,
 
 	res: {
 		type: 'array',
@@ -59,33 +35,52 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		noteId: { type: 'string', format: 'misskey:id' },
+		type: { type: 'string', nullable: true },
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		offset: { type: 'integer', default: 0 },
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['noteId'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const note = await getNote(ps.noteId).catch(e => {
-		if (e.id === '9725d0ce-ba28-4dde-95a7-2cbb2c15de24') throw new ApiError(meta.errors.noSuchNote);
-		throw e;
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.noteReactionsRepository)
+		private noteReactionsRepository: NoteReactionsRepository,
 
-	const query = {
-		noteId: note.id,
-	} as DeepPartial<NoteReaction>;
+		private noteReactionEntityService: NoteReactionEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = {
+				noteId: ps.noteId,
+			} as FindOptionsWhere<NoteReaction>;
 
-	if (ps.type) {
-		// ローカルリアクションはホスト名が . とされているが
-		// DB 上ではそうではないので、必要に応じて変換
-		const suffix = '@.:';
-		const type = ps.type.endsWith(suffix) ? ps.type.slice(0, ps.type.length - suffix.length) + ':' : ps.type;
-		query.reaction = type;
+			if (ps.type) {
+				// ローカルリアクションはホスト名が . とされているが
+				// DB 上ではそうではないので、必要に応じて変換
+				const suffix = '@.:';
+				const type = ps.type.endsWith(suffix) ? ps.type.slice(0, ps.type.length - suffix.length) + ':' : ps.type;
+				query.reaction = type;
+			}
+
+			const reactions = await this.noteReactionsRepository.find({
+				where: query,
+				take: ps.limit,
+				skip: ps.offset,
+				order: {
+					id: -1,
+				},
+				relations: ['user', 'user.avatar', 'user.banner', 'note'],
+			});
+
+			return await Promise.all(reactions.map(reaction => this.noteReactionEntityService.pack(reaction, me)));
+		});
 	}
-
-	const reactions = await NoteReactions.find({
-		where: query,
-		take: ps.limit!,
-		skip: ps.offset,
-		order: {
-			id: -1,
-		},
-	});
-
-	return await Promise.all(reactions.map(reaction => NoteReactions.pack(reaction, user)));
-});
+}

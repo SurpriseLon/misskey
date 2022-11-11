@@ -1,5 +1,3 @@
-import config from "@/config";
-
 export const packedFederationInstanceSchema = {
 	type: 'object',
 	properties: {
@@ -34,14 +32,6 @@ export const packedFederationInstanceSchema = {
 			type: 'number',
 			optional: false, nullable: false,
 		},
-		driveUsage: {
-			type: 'number',
-			optional: false, nullable: false,
-		},
-		driveFiles: {
-			type: 'number',
-			optional: false, nullable: false,
-		},
 		latestRequestSentAt: {
 			type: 'string',
 			optional: false, nullable: true,
@@ -60,6 +50,10 @@ export const packedFederationInstanceSchema = {
 			type: 'boolean',
 			optional: false, nullable: false,
 		},
+		isBlocked: {
+			type: 'boolean',
+			optional: false, nullable: false,
+		},
 		softwareName: {
 			type: 'string',
 			optional: false, nullable: true,
@@ -68,7 +62,6 @@ export const packedFederationInstanceSchema = {
 		softwareVersion: {
 			type: 'string',
 			optional: false, nullable: true,
-			example: config.version,
 		},
 		openRegistrations: {
 			type: 'boolean',
@@ -95,6 +88,15 @@ export const packedFederationInstanceSchema = {
 			type: 'string',
 			optional: false, nullable: true,
 			format: 'url',
+		},
+		faviconUrl: {
+			type: 'string',
+			optional: false, nullable: true,
+			format: 'url',
+		},
+		themeColor: {
+			type: 'string',
+			optional: false, nullable: true,
 		},
 		infoUpdatedAt: {
 			type: 'string',

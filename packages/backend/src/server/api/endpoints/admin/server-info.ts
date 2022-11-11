@@ -1,17 +1,16 @@
-import * as os from 'os';
-import * as si from 'systeminformation';
-import { getConnection } from 'typeorm';
-import define from '../../define';
-import { redisClient } from '../../../../db/redis';
+import * as os from 'node:os';
+import si from 'systeminformation';
+import { Inject, Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import Redis from 'ioredis';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	requireCredential: true,
 	requireModerator: true,
 
 	tags: ['admin', 'meta'],
-
-	params: {
-	},
 
 	res: {
 		type: 'object',
@@ -90,31 +89,53 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async () => {
-	const memStats = await si.mem();
-	const fsStats = await si.fsSize();
-	const netInterface = await si.networkInterfaceDefault();
+export const paramDef = {
+	type: 'object',
+	properties: {},
+	required: [],
+} as const;
 
-	return {
-		machine: os.hostname(),
-		os: os.platform(),
-		node: process.version,
-		psql: await getConnection().query('SHOW server_version').then(x => x[0].server_version),
-		redis: redisClient.server_info.redis_version,
-		cpu: {
-			model: os.cpus()[0].model,
-			cores: os.cpus().length,
-		},
-		mem: {
-			total: memStats.total,
-		},
-		fs: {
-			total: fsStats[0].size,
-			used: fsStats[0].used,
-		},
-		net: {
-			interface: netInterface,
-		},
-	};
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.db)
+		private db: DataSource,
+
+		@Inject(DI.redis)
+		private redisClient: Redis.Redis,
+
+	) {
+		super(meta, paramDef, async () => {
+			const memStats = await si.mem();
+			const fsStats = await si.fsSize();
+			const netInterface = await si.networkInterfaceDefault();
+
+			const redisServerInfo = await this.redisClient.info('Server');
+			const m = redisServerInfo.match(new RegExp('^redis_version:(.*)', 'm'));
+			const redis_version = m?.[1];
+
+			return {
+				machine: os.hostname(),
+				os: os.platform(),
+				node: process.version,
+				psql: await this.db.query('SHOW server_version').then(x => x[0].server_version),
+				redis: redis_version,
+				cpu: {
+					model: os.cpus()[0].model,
+					cores: os.cpus().length,
+				},
+				mem: {
+					total: memStats.total,
+				},
+				fs: {
+					total: fsStats[0].size,
+					used: fsStats[0].used,
+				},
+				net: {
+					interface: netInterface,
+				},
+			};
+		});
+	}
+}

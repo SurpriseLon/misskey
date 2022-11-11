@@ -1,13 +1,14 @@
-import autobind from 'autobind-decorator';
-import Channel from '../channel';
-import { Notes, Users } from '@/models/index';
-import { isMutedUserRelated } from '@/misc/is-muted-user-related';
-import { isBlockerUserRelated } from '@/misc/is-blocker-user-related';
-import { User } from '@/models/entities/user';
-import { StreamMessages } from '../types';
-import { Packed } from '@/misc/schema';
+import { Inject, Injectable } from '@nestjs/common';
+import type { NotesRepository, UsersRepository } from '@/models/index.js';
+import { isUserRelated } from '@/misc/is-user-related.js';
+import type { User } from '@/models/entities/User.js';
+import type { Packed } from '@/misc/schema.js';
+import { NoteEntityService } from '@/core/entities/NoteEntityService.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
+import Channel from '../channel.js';
+import type { StreamMessages } from '../types.js';
 
-export default class extends Channel {
+class ChannelChannel extends Channel {
 	public readonly chName = 'channel';
 	public static shouldShare = false;
 	public static requireCredential = false;
@@ -15,7 +16,18 @@ export default class extends Channel {
 	private typers: Record<User['id'], Date> = {};
 	private emitTypersIntervalId: ReturnType<typeof setInterval>;
 
-	@autobind
+	constructor(
+		private noteEntityService: NoteEntityService,
+		private userEntityService: UserEntityService,
+
+		id: string,
+		connection: Channel['connection'],
+	) {
+		super(id, connection);
+		this.onNote = this.onNote.bind(this);
+		this.emitTypers = this.emitTypers.bind(this);
+	}
+
 	public async init(params: any) {
 		this.channelId = params.channelId as string;
 
@@ -25,34 +37,32 @@ export default class extends Channel {
 		this.emitTypersIntervalId = setInterval(this.emitTypers, 5000);
 	}
 
-	@autobind
 	private async onNote(note: Packed<'Note'>) {
 		if (note.channelId !== this.channelId) return;
 
 		// リプライなら再pack
 		if (note.replyId != null) {
-			note.reply = await Notes.pack(note.replyId, this.user, {
+			note.reply = await this.noteEntityService.pack(note.replyId, this.user, {
 				detail: true,
 			});
 		}
 		// Renoteなら再pack
 		if (note.renoteId != null) {
-			note.renote = await Notes.pack(note.renoteId, this.user, {
+			note.renote = await this.noteEntityService.pack(note.renoteId, this.user, {
 				detail: true,
 			});
 		}
 
 		// 流れてきたNoteがミュートしているユーザーが関わるものだったら無視する
-		if (isMutedUserRelated(note, this.muting)) return;
+		if (isUserRelated(note, this.muting)) return;
 		// 流れてきたNoteがブロックされているユーザーが関わるものだったら無視する
-		if (isBlockerUserRelated(note, this.blocking)) return;
+		if (isUserRelated(note, this.blocking)) return;
 
 		this.connection.cacheNote(note);
 
 		this.send('note', note);
 	}
 
-	@autobind
 	private onEvent(data: StreamMessages['channel']['payload']) {
 		if (data.type === 'typing') {
 			const id = data.body;
@@ -64,7 +74,6 @@ export default class extends Channel {
 		}
 	}
 
-	@autobind
 	private async emitTypers() {
 		const now = new Date();
 
@@ -73,7 +82,7 @@ export default class extends Channel {
 			if (now.getTime() - date.getTime() > 5000) delete this.typers[userId];
 		}
 
-		const users = await Users.packMany(Object.keys(this.typers), null, { detail: false });
+		const users = await this.userEntityService.packMany(Object.keys(this.typers), null, { detail: false });
 
 		this.send({
 			type: 'typers',
@@ -81,12 +90,32 @@ export default class extends Channel {
 		});
 	}
 
-	@autobind
 	public dispose() {
 		// Unsubscribe events
 		this.subscriber.off('notesStream', this.onNote);
 		this.subscriber.off(`channelStream:${this.channelId}`, this.onEvent);
 
 		clearInterval(this.emitTypersIntervalId);
+	}
+}
+
+@Injectable()
+export class ChannelChannelService {
+	public readonly shouldShare = ChannelChannel.shouldShare;
+	public readonly requireCredential = ChannelChannel.requireCredential;
+
+	constructor(
+		private noteEntityService: NoteEntityService,
+		private userEntityService: UserEntityService,
+	) {
+	}
+
+	public create(id: string, connection: Channel['connection']): ChannelChannel {
+		return new ChannelChannel(
+			this.noteEntityService,
+			this.userEntityService,
+			id,
+			connection,
+		);
 	}
 }

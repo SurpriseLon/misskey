@@ -1,23 +1,13 @@
-import $ from 'cafy';
-import define from '../../define';
-import { Apps } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { AppsRepository } from '@/models/index.js';
+import { AppEntityService } from '@/core/entities/AppEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['account', 'app'],
 
 	requireCredential: true,
-
-	params: {
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 10,
-		},
-
-		offset: {
-			validator: $.optional.num.min(0),
-			default: 0,
-		},
-	},
 
 	res: {
 		type: 'array',
@@ -25,63 +15,43 @@ export const meta = {
 		items: {
 			type: 'object',
 			optional: false, nullable: false,
-			properties: {
-				id: {
-					type: 'string',
-					optional: false, nullable: false,
-				},
-				name: {
-					type: 'string',
-					optional: false, nullable: false,
-				},
-				callbackUrl: {
-					type: 'string',
-					optional: false, nullable: false,
-				},
-				permission: {
-					type: 'array',
-					optional: false, nullable: false,
-					items: {
-						type: 'string',
-						optional: false, nullable: false,
-					},
-				},
-				secret: {
-					type: 'string',
-					optional: true, nullable: false,
-				},
-				isAuthorized: {
-					type: 'object',
-					optional: true, nullable: false,
-					properties: {
-						appId: {
-							type: 'string',
-							optional: false, nullable: false,
-						},
-						userId: {
-							type: 'string',
-							optional: false, nullable: false,
-						},
-					},
-				},
-			},
+			ref: 'App',
 		},
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		offset: { type: 'integer', default: 0 },
+	},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const query = {
-		userId: user.id,
-	};
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.appsRepository)
+		private appsRepository: AppsRepository,
 
-	const apps = await Apps.find({
-		where: query,
-		take: ps.limit!,
-		skip: ps.offset,
-	});
+		private appEntityService: AppEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = {
+				userId: me.id,
+			};
 
-	return await Promise.all(apps.map(app => Apps.pack(app, user, {
-		detail: true,
-	})));
-});
+			const apps = await this.appsRepository.find({
+				where: query,
+				take: ps.limit,
+				skip: ps.offset,
+			});
+
+			return await Promise.all(apps.map(app => this.appEntityService.pack(app, me, {
+				detail: true,
+			})));
+		});
+	}
+}

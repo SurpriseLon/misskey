@@ -1,28 +1,41 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { deleteFile } from '@/services/drive/delete-file';
-import { DriveFiles } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { DriveFilesRepository } from '@/models/index.js';
+import { DriveService } from '@/core/DriveService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['admin'],
 
 	requireCredential: true,
 	requireModerator: true,
+} as const;
 
-	params: {
-		host: {
-			validator: $.str,
-		},
+export const paramDef = {
+	type: 'object',
+	properties: {
+		host: { type: 'string' },
 	},
+	required: ['host'],
 } as const;
 
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const files = await DriveFiles.find({
-		userHost: ps.host,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
 
-	for (const file of files) {
-		deleteFile(file);
+		private driveService: DriveService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const files = await this.driveFilesRepository.findBy({
+				userHost: ps.host,
+			});
+
+			for (const file of files) {
+				this.driveService.deleteFile(file);
+			}
+		});
 	}
-});
+}

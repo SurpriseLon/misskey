@@ -1,8 +1,10 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { UserLists } from '@/models/index';
-import { genId } from '@/misc/gen-id';
-import { UserList } from '@/models/entities/user-list';
+import { Inject, Injectable } from '@nestjs/common';
+import type { UserListsRepository } from '@/models/index.js';
+import { IdService } from '@/core/IdService.js';
+import type { UserList } from '@/models/entities/UserList.js';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { UserListEntityService } from '@/core/entities/UserListEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['lists'],
@@ -11,11 +13,7 @@ export const meta = {
 
 	kind: 'write:account',
 
-	params: {
-		name: {
-			validator: $.str.range(1, 100),
-		},
-	},
+	description: 'Create a new list of users.',
 
 	res: {
 		type: 'object',
@@ -24,14 +22,33 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const userList = await UserLists.insert({
-		id: genId(),
-		createdAt: new Date(),
-		userId: user.id,
-		name: ps.name,
-	} as UserList).then(x => UserLists.findOneOrFail(x.identifiers[0]));
+export const paramDef = {
+	type: 'object',
+	properties: {
+		name: { type: 'string', minLength: 1, maxLength: 100 },
+	},
+	required: ['name'],
+} as const;
 
-	return await UserLists.pack(userList);
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.userListsRepository)
+		private userListsRepository: UserListsRepository,
+
+		private userListEntityService: UserListEntityService,
+		private idService: IdService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const userList = await this.userListsRepository.insert({
+				id: this.idService.genId(),
+				createdAt: new Date(),
+				userId: me.id,
+				name: ps.name,
+			} as UserList).then(x => this.userListsRepository.findOneByOrFail(x.identifiers[0]));
+
+			return await this.userListEntityService.pack(userList);
+		});
+	}
+}

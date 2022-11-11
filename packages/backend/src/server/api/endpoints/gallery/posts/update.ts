@@ -1,11 +1,12 @@
-import $ from 'cafy';
 import ms from 'ms';
-import define from '../../../define';
-import { ID } from '../../../../../misc/cafy-id';
-import { DriveFiles, GalleryPosts } from '@/models/index';
-import { GalleryPost } from '@/models/entities/gallery-post';
-import { ApiError } from '../../../error';
-import { DriveFile } from '@/models/entities/drive-file';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { DriveFilesRepository, GalleryPostsRepository } from '@/models/index.js';
+import { GalleryPost } from '@/models/entities/GalleryPost.js';
+import type { DriveFile } from '@/models/entities/DriveFile.js';
+import { GalleryPostEntityService } from '@/core/entities/GalleryPostEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['gallery'],
@@ -19,29 +20,6 @@ export const meta = {
 		max: 300,
 	},
 
-	params: {
-		postId: {
-			validator: $.type(ID),
-		},
-
-		title: {
-			validator: $.str.min(1),
-		},
-
-		description: {
-			validator: $.optional.nullable.str,
-		},
-
-		fileIds: {
-			validator: $.arr($.type(ID)).unique().range(1, 32),
-		},
-
-		isSensitive: {
-			validator: $.optional.bool,
-			default: false,
-		},
-	},
-
 	res: {
 		type: 'object',
 		optional: false, nullable: false,
@@ -53,31 +31,58 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		postId: { type: 'string', format: 'misskey:id' },
+		title: { type: 'string', minLength: 1 },
+		description: { type: 'string', nullable: true },
+		fileIds: { type: 'array', uniqueItems: true, minItems: 1, maxItems: 32, items: {
+			type: 'string', format: 'misskey:id',
+		} },
+		isSensitive: { type: 'boolean', default: false },
+	},
+	required: ['postId', 'title', 'fileIds'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const files = (await Promise.all(ps.fileIds.map(fileId =>
-		DriveFiles.findOne({
-			id: fileId,
-			userId: user.id,
-		})
-	))).filter((file): file is DriveFile => file != null);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.galleryPostsRepository)
+		private galleryPostsRepository: GalleryPostsRepository,
 
-	if (files.length === 0) {
-		throw new Error();
+		@Inject(DI.driveFilesRepository)
+		private driveFilesRepository: DriveFilesRepository,
+
+		private galleryPostEntityService: GalleryPostEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const files = (await Promise.all(ps.fileIds.map(fileId =>
+				this.driveFilesRepository.findOneBy({
+					id: fileId,
+					userId: me.id,
+				}),
+			))).filter((file): file is DriveFile => file != null);
+
+			if (files.length === 0) {
+				throw new Error();
+			}
+
+			await this.galleryPostsRepository.update({
+				id: ps.postId,
+				userId: me.id,
+			}, {
+				updatedAt: new Date(),
+				title: ps.title,
+				description: ps.description,
+				isSensitive: ps.isSensitive,
+				fileIds: files.map(file => file.id),
+			});
+
+			const post = await this.galleryPostsRepository.findOneByOrFail({ id: ps.postId });
+
+			return await this.galleryPostEntityService.pack(post, me);
+		});
 	}
-
-	await GalleryPosts.update({
-		id: ps.postId,
-		userId: user.id,
-	}, {
-		updatedAt: new Date(),
-		title: ps.title,
-		description: ps.description,
-		isSensitive: ps.isSensitive,
-		fileIds: files.map(file => file.id),
-	});
-
-	const post = await GalleryPosts.findOneOrFail(ps.postId);
-
-	return await GalleryPosts.pack(post, user);
-});
+}

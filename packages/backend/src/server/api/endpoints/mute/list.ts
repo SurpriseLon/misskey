@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { makePaginationQuery } from '../../common/make-pagination-query';
-import { Mutings } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { MutingsRepository } from '@/models/index.js';
+import { QueryService } from '@/core/QueryService.js';
+import { MutingEntityService } from '@/core/entities/MutingEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['account'],
@@ -10,21 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'read:mutes',
-
-	params: {
-		limit: {
-			validator: $.optional.num.range(1, 100),
-			default: 30,
-		},
-
-		sinceId: {
-			validator: $.optional.type(ID),
-		},
-
-		untilId: {
-			validator: $.optional.type(ID),
-		},
-	},
 
 	res: {
 		type: 'array',
@@ -37,14 +23,35 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		limit: { type: 'integer', minimum: 1, maximum: 100, default: 30 },
+		sinceId: { type: 'string', format: 'misskey:id' },
+		untilId: { type: 'string', format: 'misskey:id' },
+	},
+	required: [],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const query = makePaginationQuery(Mutings.createQueryBuilder('muting'), ps.sinceId, ps.untilId)
-		.andWhere(`muting.muterId = :meId`, { meId: me.id });
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.mutingsRepository)
+		private mutingsRepository: MutingsRepository,
 
-	const mutings = await query
-		.take(ps.limit!)
-		.getMany();
+		private mutingEntityService: MutingEntityService,
+		private queryService: QueryService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const query = this.queryService.makePaginationQuery(this.mutingsRepository.createQueryBuilder('muting'), ps.sinceId, ps.untilId)
+				.andWhere('muting.muterId = :meId', { meId: me.id });
 
-	return await Mutings.packMany(mutings, me);
-});
+			const mutings = await query
+				.take(ps.limit)
+				.getMany();
+
+			return await this.mutingEntityService.packMany(mutings, me);
+		});
+	}
+}

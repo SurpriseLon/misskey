@@ -1,32 +1,44 @@
-import $ from 'cafy';
-import define from '../../define';
-import { AccessTokens } from '@/models/index';
-import { ID } from '@/misc/cafy-id';
-import { publishUserEvent } from '@/services/stream';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { AccessTokensRepository } from '@/models/index.js';
+import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	requireCredential: true,
 
 	secure: true,
+} as const;
 
-	params: {
-		tokenId: {
-			validator: $.type(ID),
-		},
+export const paramDef = {
+	type: 'object',
+	properties: {
+		tokenId: { type: 'string', format: 'misskey:id' },
 	},
+	required: ['tokenId'],
 } as const;
 
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	const token = await AccessTokens.findOne(ps.tokenId);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.accessTokensRepository)
+		private accessTokensRepository: AccessTokensRepository,
 
-	if (token) {
-		await AccessTokens.delete({
-			id: ps.tokenId,
-			userId: user.id,
+		private globalEventService: GlobalEventService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const token = await this.accessTokensRepository.findOneBy({ id: ps.tokenId });
+
+			if (token) {
+				await this.accessTokensRepository.delete({
+					id: ps.tokenId,
+					userId: me.id,
+				});
+
+				// Terminate streaming
+				this.globalEventService.publishUserEvent(me.id, 'terminate');
+			}
 		});
-
-		// Terminate streaming
-		publishUserEvent(user.id, 'terminate');
 	}
-});
+}

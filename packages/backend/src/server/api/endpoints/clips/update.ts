@@ -1,8 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Clips } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { ClipsRepository } from '@/models/index.js';
+import { ClipEntityService } from '@/core/entities/ClipEntityService.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['clips'],
@@ -10,24 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:account',
-
-	params: {
-		clipId: {
-			validator: $.type(ID),
-		},
-
-		name: {
-			validator: $.str.range(1, 100),
-		},
-
-		isPublic: {
-			validator: $.optional.bool,
-		},
-
-		description: {
-			validator: $.optional.nullable.str.range(1, 2048),
-		},
-	},
 
 	errors: {
 		noSuchClip: {
@@ -44,23 +27,44 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		clipId: { type: 'string', format: 'misskey:id' },
+		name: { type: 'string', minLength: 1, maxLength: 100 },
+		isPublic: { type: 'boolean' },
+		description: { type: 'string', nullable: true, minLength: 1, maxLength: 2048 },
+	},
+	required: ['clipId', 'name'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	// Fetch the clip
-	const clip = await Clips.findOne({
-		id: ps.clipId,
-		userId: user.id,
-	});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.clipsRepository)
+		private clipsRepository: ClipsRepository,
 
-	if (clip == null) {
-		throw new ApiError(meta.errors.noSuchClip);
+		private clipEntityService: ClipEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			// Fetch the clip
+			const clip = await this.clipsRepository.findOneBy({
+				id: ps.clipId,
+				userId: me.id,
+			});
+
+			if (clip == null) {
+				throw new ApiError(meta.errors.noSuchClip);
+			}
+
+			await this.clipsRepository.update(clip.id, {
+				name: ps.name,
+				description: ps.description,
+				isPublic: ps.isPublic,
+			});
+
+			return await this.clipEntityService.pack(clip.id);
+		});
 	}
-
-	await Clips.update(clip.id, {
-		name: ps.name,
-		description: ps.description,
-		isPublic: ps.isPublic,
-	});
-
-	return await Clips.pack(clip.id);
-});
+}

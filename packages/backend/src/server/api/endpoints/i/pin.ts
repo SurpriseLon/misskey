@@ -1,9 +1,9 @@
-import $ from 'cafy';
-import { ID } from '@/misc/cafy-id';
-import { addPinned } from '@/services/i/pin';
-import define from '../../define';
-import { ApiError } from '../../error';
-import { Users } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { UsersRepository } from '@/models/index.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
+import { NotePiningService } from '@/core/NotePiningService.js';
+import { ApiError } from '../../error.js';
 
 export const meta = {
 	tags: ['account', 'notes'],
@@ -11,12 +11,6 @@ export const meta = {
 	requireCredential: true,
 
 	kind: 'write:account',
-
-	params: {
-		noteId: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchNote: {
@@ -45,16 +39,32 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	await addPinned(user, ps.noteId).catch(e => {
-		if (e.id === '70c4e51f-5bea-449c-a030-53bee3cce202') throw new ApiError(meta.errors.noSuchNote);
-		if (e.id === '15a018eb-58e5-4da1-93be-330fcc5e4e1a') throw new ApiError(meta.errors.pinLimitExceeded);
-		if (e.id === '23f0cf4e-59a3-4276-a91d-61a5891c1514') throw new ApiError(meta.errors.alreadyPinned);
-		throw e;
-	});
+export const paramDef = {
+	type: 'object',
+	properties: {
+		noteId: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['noteId'],
+} as const;
 
-	return await Users.pack<true, true>(user.id, user, {
-		detail: true,
-	});
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		private userEntityService: UserEntityService,
+		private notePiningService: NotePiningService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			await this.notePiningService.addPinned(me, ps.noteId).catch(err => {
+				if (err.id === '70c4e51f-5bea-449c-a030-53bee3cce202') throw new ApiError(meta.errors.noSuchNote);
+				if (err.id === '15a018eb-58e5-4da1-93be-330fcc5e4e1a') throw new ApiError(meta.errors.pinLimitExceeded);
+				if (err.id === '23f0cf4e-59a3-4276-a91d-61a5891c1514') throw new ApiError(meta.errors.alreadyPinned);
+				throw err;
+			});
+
+			return await this.userEntityService.pack<true, true>(me.id, me, {
+				detail: true,
+			});
+		});
+	}
+}

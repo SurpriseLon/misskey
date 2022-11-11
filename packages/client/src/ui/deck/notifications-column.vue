@@ -1,53 +1,44 @@
 <template>
-<XColumn :column="column" :is-stacked="isStacked" :func="{ handler: func, title: $ts.notificationSetting }">
+<XColumn :column="column" :is-stacked="isStacked" :menu="menu" @parent-focus="$event => emit('parent-focus', $event)">
 	<template #header><i class="fas fa-bell" style="margin-right: 8px;"></i>{{ column.name }}</template>
 
 	<XNotifications :include-types="column.includingTypes"/>
 </XColumn>
 </template>
 
-<script lang="ts">
-import { defineComponent } from 'vue';
+<script lang="ts" setup>
+import { defineAsyncComponent } from 'vue';
 import XColumn from './column.vue';
-import XNotifications from '@/components/notifications.vue';
+import { updateColumn , Column } from './deck-store';
+import XNotifications from '@/components/MkNotifications.vue';
 import * as os from '@/os';
-import { updateColumn } from './deck-store';
+import { i18n } from '@/i18n';
 
-export default defineComponent({
-	components: {
-		XColumn,
-		XNotifications
-	},
+const props = defineProps<{
+	column: Column;
+	isStacked: boolean;
+}>();
 
-	props: {
-		column: {
-			type: Object,
-			required: true
+const emit = defineEmits<{
+	(ev: 'parent-focus', direction: 'up' | 'down' | 'left' | 'right'): void;
+}>();
+
+function func() {
+	os.popup(defineAsyncComponent(() => import('@/components/MkNotificationSettingWindow.vue')), {
+		includingTypes: props.column.includingTypes,
+	}, {
+		done: async (res) => {
+			const { includingTypes } = res;
+			updateColumn(props.column.id, {
+				includingTypes: includingTypes,
+			});
 		},
-		isStacked: {
-			type: Boolean,
-			required: true
-		}
-	},
+	}, 'closed');
+}
 
-	data() {
-		return {
-		}
-	},
-
-	methods: {
-		func() {
-			os.popup(import('@/components/notification-setting-window.vue'), {
-				includingTypes: this.column.includingTypes,
-			}, {
-				done: async (res) => {
-					const { includingTypes } = res;
-					updateColumn(this.column.id, {
-						includingTypes: includingTypes
-					});
-				},
-			}, 'closed');
-		}
-	}
-});
+const menu = [{
+	icon: 'fas fa-pencil-alt',
+	text: i18n.ts.notificationSetting,
+	action: func,
+}];
 </script>

@@ -1,20 +1,14 @@
-import $ from 'cafy';
-import define from '../../../define';
-import { ID } from '@/misc/cafy-id';
-import { Ads } from '@/models/index';
-import { ApiError } from '../../../error';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { AdsRepository } from '@/models/index.js';
+import { DI } from '@/di-symbols.js';
+import { ApiError } from '../../../error.js';
 
 export const meta = {
 	tags: ['admin'],
 
 	requireCredential: true,
 	requireModerator: true,
-
-	params: {
-		id: {
-			validator: $.type(ID),
-		},
-	},
 
 	errors: {
 		noSuchAd: {
@@ -25,11 +19,27 @@ export const meta = {
 	},
 } as const;
 
+export const paramDef = {
+	type: 'object',
+	properties: {
+		id: { type: 'string', format: 'misskey:id' },
+	},
+	required: ['id'],
+} as const;
+
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const ad = await Ads.findOne(ps.id);
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.adsRepository)
+		private adsRepository: AdsRepository,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const ad = await this.adsRepository.findOneBy({ id: ps.id });
 
-	if (ad == null) throw new ApiError(meta.errors.noSuchAd);
+			if (ad == null) throw new ApiError(meta.errors.noSuchAd);
 
-	await Ads.delete(ad.id);
-});
+			await this.adsRepository.delete(ad.id);
+		});
+	}
+}

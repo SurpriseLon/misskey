@@ -1,7 +1,7 @@
-import $ from 'cafy';
-import define from '../../define';
-import { createExportFollowingJob } from '@/queue/index';
+import { Inject, Injectable } from '@nestjs/common';
 import ms from 'ms';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import { QueueService } from '@/core/QueueService.js';
 
 export const meta = {
 	secure: true,
@@ -10,19 +10,25 @@ export const meta = {
 		duration: ms('1hour'),
 		max: 1,
 	},
-	params: {
-		excludeMuting: {
-			validator: $.optional.bool,
-			default: false,
-		},
-		excludeInactive: {
-			validator: $.optional.bool,
-			default: false,
-		},
+} as const;
+
+export const paramDef = {
+	type: 'object',
+	properties: {
+		excludeMuting: { type: 'boolean', default: false },
+		excludeInactive: { type: 'boolean', default: false },
 	},
+	required: [],
 } as const;
 
 // eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, user) => {
-	createExportFollowingJob(user, ps.excludeMuting, ps.excludeInactive);
-});
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		private queueService: QueueService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			this.queueService.createExportFollowingJob(me, ps.excludeMuting, ps.excludeInactive);
+		});
+	}
+}

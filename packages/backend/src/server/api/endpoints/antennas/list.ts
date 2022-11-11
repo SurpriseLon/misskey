@@ -1,5 +1,8 @@
-import define from '../../define';
-import { Antennas } from '@/models/index';
+import { Inject, Injectable } from '@nestjs/common';
+import { Endpoint } from '@/server/api/endpoint-base.js';
+import type { AntennasRepository } from '@/models/index.js';
+import { AntennaEntityService } from '@/core/entities/AntennaEntityService.js';
+import { DI } from '@/di-symbols.js';
 
 export const meta = {
 	tags: ['antennas', 'account'],
@@ -19,11 +22,27 @@ export const meta = {
 	},
 } as const;
 
-// eslint-disable-next-line import/no-default-export
-export default define(meta, async (ps, me) => {
-	const antennas = await Antennas.find({
-		userId: me.id,
-	});
+export const paramDef = {
+	type: 'object',
+	properties: {},
+	required: [],
+} as const;
 
-	return await Promise.all(antennas.map(x => Antennas.pack(x)));
-});
+// eslint-disable-next-line import/no-default-export
+@Injectable()
+export default class extends Endpoint<typeof meta, typeof paramDef> {
+	constructor(
+		@Inject(DI.antennasRepository)
+		private antennasRepository: AntennasRepository,
+
+		private antennaEntityService: AntennaEntityService,
+	) {
+		super(meta, paramDef, async (ps, me) => {
+			const antennas = await this.antennasRepository.findBy({
+				userId: me.id,
+			});
+
+			return await Promise.all(antennas.map(x => this.antennaEntityService.pack(x)));
+		});
+	}
+}
