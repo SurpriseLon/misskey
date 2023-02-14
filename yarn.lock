@@ -927,9 +927,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@fastify/multipart@npm:7.3.0":
-  version: 7.3.0
-  resolution: "@fastify/multipart@npm:7.3.0"
+"@fastify/multipart@npm:7.4.1":
+  version: 7.4.1
+  resolution: "@fastify/multipart@npm:7.4.1"
   dependencies:
     "@fastify/busboy": ^1.0.0
     "@fastify/deepmerge": ^1.0.0
@@ -939,7 +939,7 @@ __metadata:
     hexoid: ^1.0.0
     secure-json-parse: ^2.4.0
     stream-wormhole: ^1.1.0
-  checksum: 192fc4f0892c34d342a3673c6522e13c0987747c4972b52ea48ca7978ea54b5a892d4594778b643dc35f37f429496b13a4e244d8c7eef60a852fadb52144fcbe
+  checksum: e59038700dbe656682e29cde8c6bc681045212dde1bb5b0a0d6ff3f167df932b7ab065e9e6149a649f83912db873ae5d1c99a770ca058236d575e2549ec3fb2e
   languageName: node
   linkType: hard
 
@@ -4126,7 +4126,7 @@ __metadata:
     "@fastify/cookie": ^8.3.0
     "@fastify/cors": 8.2.0
     "@fastify/http-proxy": ^8.4.0
-    "@fastify/multipart": 7.3.0
+    "@fastify/multipart": 7.4.1
     "@fastify/static": 6.6.0
     "@fastify/view": 7.3.0
     "@nestjs/common": 9.2.1
